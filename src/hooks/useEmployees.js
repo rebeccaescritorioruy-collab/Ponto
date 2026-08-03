@@ -14,6 +14,7 @@ function mapRow(row) {
     jornadaMensalHoras: row.jornada_mensal_horas,
     entradaPrevista: row.entrada_prevista,
     saidaPrevista: row.saida_prevista,
+    intervaloMinutos: row.intervalo_minutos,
     ativo: row.ativo,
     passwordHash: row.password_hash,
   }
@@ -32,6 +33,7 @@ function toRow(emp) {
     jornada_mensal_horas: emp.jornadaMensalHoras,
     entrada_prevista: emp.entradaPrevista,
     saida_prevista: emp.saidaPrevista,
+    intervalo_minutos: emp.intervaloMinutos === "" ? null : emp.intervaloMinutos,
     ativo: emp.ativo,
     password_hash: emp.passwordHash ?? null,
   }

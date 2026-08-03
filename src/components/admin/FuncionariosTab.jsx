@@ -3,6 +3,7 @@ import { supabase } from "../../lib/supabase"
 import { useEmployees } from "../../hooks/useEmployees"
 import {
   sha256, formatCPF, VINCULOS, vinculoLabel, jornadasDisponiveis, getJornadaPreset, formatRegimeResumo,
+  intervaloPrevistoMinutos, formatIntervaloPrevisto,
 } from "../../lib/calculo"
 import Card from "../ui/Card"
 import TextField from "../ui/TextField"
@@ -14,7 +15,7 @@ function emptyEmpForm() {
   return {
     cpf: "", nome: "", matricula: "", cargo: "", admissao: "", horario: "",
     vinculo: "clt", horasDiarias: "8", jornadaMensalHoras: "200",
-    entradaPrevista: "", saidaPrevista: "", senha: "", ativo: true,
+    entradaPrevista: "", saidaPrevista: "", intervaloMinutos: "", senha: "", ativo: true,
   }
 }
 
@@ -59,7 +60,10 @@ export default function FuncionariosTab() {
   }
 
   function startEdit(emp) {
-    setEmpForm({ ...emptyEmpForm(), ...emp, senha: "" })
+    setEmpForm({
+      ...emptyEmpForm(), ...emp, senha: "",
+      intervaloMinutos: emp.intervaloMinutos === null || emp.intervaloMinutos === undefined ? "" : String(emp.intervaloMinutos),
+    })
     setEditingCpf(emp.cpf)
   }
 
@@ -125,7 +129,10 @@ export default function FuncionariosTab() {
             label="Regime de jornada" value={empForm.horasDiarias}
             onChange={(e) => {
               const preset = getJornadaPreset(e.target.value)
-              setEmpForm({ ...empForm, horasDiarias: e.target.value, jornadaMensalHoras: preset ? String(preset.horasMensais) : "" })
+              setEmpForm({
+                ...empForm, horasDiarias: e.target.value, jornadaMensalHoras: preset ? String(preset.horasMensais) : "",
+                intervaloMinutos: String(intervaloPrevistoMinutos(e.target.value)),
+              })
             }}
           >
             <option value="">Selecione</option>
@@ -138,6 +145,13 @@ export default function FuncionariosTab() {
 
           <TextField label="Entrada prevista" type="time" value={empForm.entradaPrevista} onChange={(e) => setEmpForm({ ...empForm, entradaPrevista: e.target.value })} />
           <TextField label="Saída prevista" type="time" value={empForm.saidaPrevista} onChange={(e) => setEmpForm({ ...empForm, saidaPrevista: e.target.value })} />
+
+          <TextField
+            label="Duração do intervalo (minutos)" type="number" min="0" step="5"
+            placeholder={`Mínimo legal: ${intervaloPrevistoMinutos(empForm.horasDiarias)} min`}
+            value={empForm.intervaloMinutos}
+            onChange={(e) => setEmpForm({ ...empForm, intervaloMinutos: e.target.value })}
+          />
 
           <TextField
             label={editingCpf ? "Nova senha (deixe em branco para manter)" : "Senha de acesso"} type="password"
@@ -171,6 +185,7 @@ export default function FuncionariosTab() {
                   <th className="py-2 pr-4 font-medium">Vínculo</th>
                   <th className="py-2 pr-4 font-medium">Cargo</th>
                   <th className="py-2 pr-4 font-medium">Jornada</th>
+                  <th className="py-2 pr-4 font-medium">Intervalo</th>
                   <th className="py-2 pr-4 font-medium">Status</th>
                   <th className="py-2 pr-4 font-medium">Ações</th>
                 </tr>
@@ -183,6 +198,7 @@ export default function FuncionariosTab() {
                     <td className="py-2 pr-4 text-neutral-600">{vinculoLabel(e.vinculo)}</td>
                     <td className="py-2 pr-4 text-neutral-600">{e.cargo}</td>
                     <td className="py-2 pr-4 text-neutral-600">{formatRegimeResumo(e.horasDiarias, e.jornadaMensalHoras)}</td>
+                    <td className="py-2 pr-4 text-neutral-600">{formatIntervaloPrevisto(e)}</td>
                     <td className="py-2 pr-4">
                       <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${e.ativo ? "bg-emerald-100 text-emerald-700" : "bg-neutral-100 text-neutral-500"}`}>
                         {e.ativo ? "Ativo" : "Inativo"}

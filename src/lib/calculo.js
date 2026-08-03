@@ -174,19 +174,28 @@ export function intervaloPrevistoMinutos(horasDiarias) {
   return 0
 }
 
-export function formatIntervaloPrevisto(vinculo, horasDiarias) {
-  const min = intervaloPrevistoMinutos(horasDiarias)
+/* A CLT fixa apenas o MÍNIMO de intervalo por faixa de jornada (art. 71) — nada impede o
+   escritório de conceder um intervalo maior por acordo (ex.: 6h/dia trabalhadas com 2h de
+   intervalo, ficando 8h à disposição no total). Por isso o intervalo efetivo de um
+   funcionário é o valor cadastrado nele (`intervaloMinutos`) quando existir, caindo para o
+   mínimo legal da faixa (`intervaloPrevistoMinutos`) só quando não foi customizado. */
+export function intervaloEfetivoMinutos(employee) {
+  const custom = employee?.intervaloMinutos
+  return custom !== null && custom !== undefined && custom !== "" ? Number(custom) : intervaloPrevistoMinutos(employee?.horasDiarias)
+}
+
+export function formatIntervaloPrevisto(employee) {
+  const min = intervaloEfetivoMinutos(employee)
   if (min === 0) return "Sem intervalo previsto"
-  const texto = min >= 60 ? `${min / 60}h` : `${min}min`
-  return intervaloContaComoJornada(vinculo, horasDiarias) ? `${texto} (computado dentro da jornada)` : texto
+  const texto = min >= 60 ? `${(min / 60).toFixed(min % 60 ? 1 : 0)}h` : `${min}min`
+  return intervaloContaComoJornada(employee?.vinculo, employee?.horasDiarias) ? `${texto} (computado dentro da jornada)` : texto
 }
 
 /* Deriva os horários previstos de início/fim do intervalo a partir da entrada
    prevista e da jornada diária, centralizando o intervalo no meio do turno. */
-export function deriveIntervalSchedule(entradaPrevista, horasDiarias) {
+export function deriveIntervalSchedule(entradaPrevista, horasDiarias, intervaloMin) {
   if (!entradaPrevista) return [null, null]
   const workMin = (Number(horasDiarias) || 0) * 60
-  const intervaloMin = intervaloPrevistoMinutos(horasDiarias)
   const [h, m] = entradaPrevista.split(":").map(Number)
   const startMinutesOfDay = h * 60 + m
   const inicioIntervaloMin = startMinutesOfDay + workMin / 2
@@ -239,7 +248,9 @@ export function buildDaySummary(dayKey, punches, treatments, employee) {
     }
   }
 
-  const [inicioIntervaloDerivado, fimIntervaloDerivado] = deriveIntervalSchedule(employee?.entradaPrevista, horasDiarias)
+  const [inicioIntervaloDerivado, fimIntervaloDerivado] = deriveIntervalSchedule(
+    employee?.entradaPrevista, horasDiarias, intervaloEfetivoMinutos(employee)
+  )
   const schedule = [
     employee?.entradaPrevista, inicioIntervaloDerivado,
     fimIntervaloDerivado, employee?.saidaPrevista,
