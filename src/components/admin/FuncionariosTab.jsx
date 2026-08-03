@@ -13,7 +13,7 @@ import Alert from "../ui/Alert"
 
 function emptyEmpForm() {
   return {
-    cpf: "", nome: "", matricula: "", cargo: "", admissao: "", horario: "",
+    cpf: "", nome: "", matricula: "", cargo: "", ctps: "", lotacao: "", admissao: "", horario: "",
     vinculo: "clt", horasDiarias: "8", jornadaMensalHoras: "200",
     entradaPrevista: "", saidaPrevista: "", intervaloMinutos: "", senha: "", ativo: true,
   }
@@ -119,6 +119,8 @@ export default function FuncionariosTab() {
 
           <TextField label="Matrícula" value={empForm.matricula} onChange={(e) => setEmpForm({ ...empForm, matricula: e.target.value })} />
           <TextField label="Cargo / função" value={empForm.cargo} onChange={(e) => setEmpForm({ ...empForm, cargo: e.target.value })} />
+          <TextField label="CTPS" placeholder="ex.: 00007033955/08474" value={empForm.ctps} onChange={(e) => setEmpForm({ ...empForm, ctps: e.target.value })} />
+          <TextField label="Lotação / unidade" placeholder="ex.: 001 João Pessoa" value={empForm.lotacao} onChange={(e) => setEmpForm({ ...empForm, lotacao: e.target.value })} />
           <TextField label="Data de admissão" type="date" value={empForm.admissao} onChange={(e) => setEmpForm({ ...empForm, admissao: e.target.value })} />
           <TextField
             label="Horário contratual (descritivo)" placeholder="ex.: 08h–12h / 13h–18h"

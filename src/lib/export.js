@@ -1,7 +1,7 @@
-import * as XLSX from "xlsx"
+import ExcelJS from "exceljs"
 import {
-  formatCPF, vinculoLabel, horasDiariasToClock, minutesToClock, minutesToHHMM,
-  weekdayAbbrev, monthLabelPt, TOLERANCIA_DIARIA_MIN,
+  formatCPF, vinculoLabel, minutesToClock, minutesToHHMM,
+  weekdayFullPt, isWeekend, todayKey,
 } from "./calculo"
 
 function triggerDownload(blob, filename) {
@@ -15,114 +15,194 @@ function triggerDownload(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 30000)
 }
 
+const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+const INK = "FF393E46" // grafite da marca (cabeçalhos)
+const GOLD_LIGHT = "FFF5EAD0" // dourado claro da marca (destaque dos totais)
+const THIN_BORDER = { style: "thin", color: { argb: "FFD0D0D0" } }
+const ALL_BORDERS = { top: THIN_BORDER, left: THIN_BORDER, bottom: THIN_BORDER, right: THIN_BORDER }
+
+function styleHeaderRow(row) {
+  row.eachCell((cell) => {
+    cell.font = { bold: true, color: { argb: "FFFFFFFF" } }
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: INK } }
+    cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true }
+    cell.border = ALL_BORDERS
+  })
+  row.height = 26
+}
+
+function styleDataRow(row, { muted = false } = {}) {
+  row.eachCell({ includeEmpty: true }, (cell) => {
+    cell.border = ALL_BORDERS
+    cell.alignment = { vertical: "middle" }
+    if (muted) cell.font = { italic: true, color: { argb: "FF999999" } }
+  })
+}
+
 /**
  * @param {object} params
- * @param {object} params.employee - { cpf, nome, cargo, vinculo, horasDiarias, entradaPrevista }
+ * @param {object} params.employee - { cpf, nome, cargo, ctps, lotacao, matricula, vinculo, horasDiarias }
  * @param {object} params.empresa - { nome, cnpj }
  * @param {"mensal"|"semanal"} params.reportTipo
  * @param {{start:string,end:string}} params.periodRange
  * @param {string} params.espelhoMonth - "YYYY-MM", usado só quando reportTipo === "mensal"
  * @param {Record<string, object>} params.summaries - dayKey -> resultado de buildDaySummary
- * @param {number} params.periodTargetMinutes
  * @param {number} params.totalWorked
  * @param {number} params.totalPositivas
  * @param {number} params.totalNegativas
- * @param {string[]} params.diasSemRegistro
  */
 export function exportEspelhoXLSX(params) {
-  const {
-    employee: emp, empresa, reportTipo, periodRange, espelhoMonth,
-    summaries, periodTargetMinutes, totalWorked, totalPositivas, totalNegativas, diasSemRegistro,
-  } = params
+  const { employee: emp, reportTipo, periodRange, espelhoMonth } = params
+  const filename = `folha-ponto-${emp.nome.replace(/\s+/g, "_")}-${reportTipo}-${reportTipo === "semanal" ? periodRange.start : espelhoMonth}.xlsx`
+  buildEspelhoWorkbook(params).then((buffer) => {
+    triggerDownload(new Blob([buffer], { type: XLSX_MIME }), filename)
+  })
+  return filename
+}
 
-  const titulo = reportTipo === "semanal" ? "FOLHA DE PONTO SEMANAL" : "FOLHA DE PONTO MENSAL"
-  const periodoLabel = reportTipo === "semanal"
-    ? `Semana de ${periodRange.start} a ${periodRange.end}`
-    : monthLabelPt(espelhoMonth)
-  const periodoCurto = reportTipo === "semanal" ? `${periodRange.start} a ${periodRange.end}` : monthLabelPt(espelhoMonth)
-
-  const rows = []
-  rows[0] = [titulo]
-  rows[1] = [`${empresa.nome || ""}${empresa.cnpj ? " · CNPJ " + empresa.cnpj : ""} — ${periodoLabel}`]
-  rows[2] = []
-  rows[3] = ["Colaborador:", emp.nome, "", "", "", "Cargo:", emp.cargo, "", "Jornada/dia:", horasDiariasToClock(emp.horasDiarias), "", ""]
-  rows[4] = [
-    "CPF:", formatCPF(emp.cpf), "", "", "", "Vínculo:", vinculoLabel(emp.vinculo), "",
-    reportTipo === "semanal" ? "Semana:" : "Mês/Ano:", periodoCurto, "Tol./dia:", minutesToClock(TOLERANCIA_DIARIA_MIN),
-  ]
-  rows[5] = []
-  rows[6] = ["Dia", "Data", "Sem.", "Entrada", "Saída Almoço", "Retorno Almoço", "Saída", "Horas Trabalhadas", "Horas Extras", "Horas Faltantes", "Alerta", "Observação"]
-
-  const dayKeys = Object.keys(summaries).sort()
-  dayKeys.forEach((dayKey) => {
+/** Calcula as linhas do espelho (uma por dia) num formato puro, reaproveitado tanto pela
+    exportação em Excel quanto pela pré-visualização em tela — garante que as duas mostrem
+    exatamente a mesma coisa. */
+export function computeEspelhoRows(summaries) {
+  const hoje = todayKey()
+  return Object.keys(summaries).sort().map((dayKey) => {
     const s = summaries[dayKey]
-    const dia = Number(dayKey.slice(8, 10))
     const dataFmt = `${dayKey.slice(8, 10)}/${dayKey.slice(5, 7)}/${dayKey.slice(0, 4)}`
-    const sem = weekdayAbbrev(dayKey)
+    const diaSemana = weekdayFullPt(dayKey)
+    const futuro = dayKey > hoje
 
-    let entrada = "", saidaAlmoco = "", retornoAlmoco = "", saida = ""
-    let horasTrabalhadas = "00:00", horasExtras = "00:00", horasFaltantes = "00:00"
-    let alerta = "", observacao = ""
+    let entrada = "", saidaIntervalo = "", retornoIntervalo = "", saida = ""
+    let horasTrabalhadas = "", horasPositivas = "", horasNegativas = ""
+    let observacao = ""
 
-    if (s.status === "abonado") {
-      alerta = "Abonado"
-      observacao = s.motivo || ""
+    if (futuro) {
+      observacao = "Ainda não ocorreu — preencha os horários quando o dia acontecer"
+    } else if (s.status === "abonado") {
+      horasTrabalhadas = minutesToClock(s.minutes)
+      horasPositivas = "0:00"
+      horasNegativas = "0:00"
+      observacao = `Abonado: ${s.motivo || ""}`
     } else if (s.status === "sem_registro") {
-      alerta = "Sem registro (verificar se é folga/DSR ou falta não justificada)"
+      observacao = isWeekend(dayKey)
+        ? "Fim de semana"
+        : "Sem registro — verificar se é folga/DSR ou falta não justificada"
+    } else if (s.status === "incompleto") {
+      s.merged.forEach((p) => {
+        const hhmm = `${String(new Date(p.time).getHours()).padStart(2, "0")}:${String(new Date(p.time).getMinutes()).padStart(2, "0")}`
+        if (p.type === "Entrada" && !entrada) entrada = hhmm
+        if (p.type === "Início do intervalo" && !saidaIntervalo) saidaIntervalo = hhmm
+        if (p.type === "Fim do intervalo" && !retornoIntervalo) retornoIntervalo = hhmm
+        if (p.type === "Saída" && !saida) saida = hhmm
+      })
+      observacao = "Marcação incompleta nesse dia — confirmar horário que falta com o(a) colaborador(a)"
     } else {
       s.merged.forEach((p) => {
-        const hhmm = p.time ? `${String(new Date(p.time).getHours()).padStart(2, "0")}:${String(new Date(p.time).getMinutes()).padStart(2, "0")}` : ""
+        const hhmm = `${String(new Date(p.time).getHours()).padStart(2, "0")}:${String(new Date(p.time).getMinutes()).padStart(2, "0")}`
         if (p.type === "Entrada" && !entrada) entrada = hhmm
-        if (p.type === "Início do intervalo" && !saidaAlmoco) saidaAlmoco = hhmm
-        if (p.type === "Fim do intervalo" && !retornoAlmoco) retornoAlmoco = hhmm
+        if (p.type === "Início do intervalo" && !saidaIntervalo) saidaIntervalo = hhmm
+        if (p.type === "Fim do intervalo" && !retornoIntervalo) retornoIntervalo = hhmm
         if (p.type === "Saída" && !saida) saida = hhmm
         if (p.incluida) observacao = observacao ? `${observacao}; Incluída: ${p.motivo}` : `Incluída: ${p.motivo}`
       })
       horasTrabalhadas = minutesToClock(s.minutes)
-      horasExtras = minutesToClock(s.balance > 0 ? s.balance : 0)
-      horasFaltantes = minutesToClock(s.balance < 0 ? -s.balance : 0)
+      horasPositivas = minutesToClock(s.balance > 0 ? s.balance : 0)
+      horasNegativas = minutesToClock(s.balance < 0 ? -s.balance : 0)
       if (s.toleranciaAplicada) {
-        observacao = observacao ? `${observacao}; Dentro da tolerância (art. 58 §1º CLT)` : "Dentro da tolerância (art. 58 §1º CLT)"
-      }
-      if (s.balance < 0) {
-        alerta = emp.entradaPrevista && emp.saidaPrevista ? "Fora da tolerância (desconto integral)" : "Horas faltantes"
-      } else if (s.balance > 0) {
-        alerta = "Horas extras"
+        observacao = observacao ? `${observacao}; Dentro da tolerância diária de 10min (art. 58 §1º CLT)` : "Dentro da tolerância diária de 10min (art. 58 §1º CLT)"
       }
       if (s.intervaloComputadoNaJornada) {
         observacao = observacao ? `${observacao}; Intervalo computado na jornada (estágio)` : "Intervalo computado na jornada (estágio)"
       }
     }
 
-    rows.push([dia, dataFmt, sem, entrada, saidaAlmoco, retornoAlmoco, saida, horasTrabalhadas, horasExtras, horasFaltantes, alerta, observacao])
+    return {
+      dayKey, dataFmt, diaSemana, entrada, saidaIntervalo, retornoIntervalo, saida,
+      horasTrabalhadas, horasPositivas, horasNegativas, observacao,
+      muted: futuro || s.status === "sem_registro",
+    }
+  })
+}
+
+async function buildEspelhoWorkbook(params) {
+  const {
+    employee: emp, empresa, reportTipo, periodRange,
+    summaries, totalWorked, totalPositivas, totalNegativas,
+  } = params
+
+  const hoje = todayKey()
+  const periodoCurto = `${periodRange.start} a ${periodRange.end}`
+  const disponivelAte = periodRange.end > hoje
+    ? ` (dados disponíveis até ${hoje.slice(8, 10)}/${hoje.slice(5, 7)}/${hoje.slice(0, 4)})`
+    : ""
+
+  const workbook = new ExcelJS.Workbook()
+  const sheet = workbook.addWorksheet(reportTipo === "semanal" ? "Semana" : "Mês")
+  sheet.columns = [
+    { width: 12 }, { width: 13 }, { width: 9 }, { width: 13 }, { width: 14 },
+    { width: 9 }, { width: 16 }, { width: 14 }, { width: 14 }, { width: 55 },
+  ]
+
+  function infoRow(label, value) {
+    const row = sheet.addRow([label, value])
+    row.getCell(1).font = { bold: true }
+    sheet.mergeCells(row.number, 2, row.number, 10)
+  }
+  infoRow("Empregador", empresa.nome || "")
+  infoRow("CNPJ/CEI", empresa.cnpj || "")
+  infoRow("Trabalhador", `${emp.nome}${emp.matricula ? ` — Matrícula ${emp.matricula}` : ""}`)
+  infoRow("Cargo / Lotação", `${emp.cargo || ""}${emp.lotacao ? ` — ${emp.lotacao}` : ""}`)
+  infoRow("CTPS", emp.ctps || "")
+  infoRow("Período", `${periodoCurto}${disponivelAte}`)
+  sheet.addRow([])
+
+  const headerRow = sheet.addRow([
+    "Data", "Dia da semana", "Entrada", "Saída intervalo", "Retorno intervalo", "Saída",
+    "Horas trabalhadas", "Horas positivas", "Horas negativas", "Observação / Justificativa / Assinatura",
+  ])
+  styleHeaderRow(headerRow)
+  sheet.views = [{ state: "frozen", ySplit: headerRow.number }]
+
+  computeEspelhoRows(summaries).forEach((r) => {
+    const row = sheet.addRow([
+      r.dataFmt, r.diaSemana, r.entrada, r.saidaIntervalo, r.retornoIntervalo, r.saida,
+      r.horasTrabalhadas, r.horasPositivas, r.horasNegativas, r.observacao,
+    ])
+    styleDataRow(row, { muted: r.muted })
   })
 
-  rows.push([])
-  rows.push(["", "", "", "", "", "", "Jornada do período:", minutesToClock(periodTargetMinutes), "", "", "", ""])
-  rows.push(["", "", "", "", "", "", "Totais:", minutesToClock(totalWorked), minutesToClock(totalPositivas), minutesToClock(totalNegativas), "", ""])
-  if (diasSemRegistro.length > 0) {
-    rows.push([])
-    rows.push(["Dias sem nenhum registro (confirmar folga/DSR ou falta):", diasSemRegistro.join(", ")])
+  sheet.addRow([])
+  const totaisHeaderRow = sheet.addRow([`TOTAIS DO PERÍODO — ${periodoCurto}`])
+  sheet.mergeCells(totaisHeaderRow.number, 1, totaisHeaderRow.number, 10)
+  totaisHeaderRow.getCell(1).font = { bold: true, color: { argb: "FFFFFFFF" } }
+  totaisHeaderRow.getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: INK } }
+  totaisHeaderRow.getCell(1).alignment = { horizontal: "center" }
+  totaisHeaderRow.height = 20
+
+  function totalRow(label, value) {
+    const row = sheet.addRow([label])
+    sheet.mergeCells(row.number, 1, row.number, 6)
+    const valueCell = row.getCell(7)
+    valueCell.value = value
+    valueCell.alignment = { horizontal: "right" }
+    row.font = { bold: true }
+    row.eachCell({ includeEmpty: true }, (cell) => {
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: GOLD_LIGHT } }
+    })
   }
+  totalRow("Total trabalhado (bruto)", minutesToClock(totalWorked))
+  totalRow("Total de horas positivas", minutesToClock(totalPositivas))
+  totalRow("Total de horas negativas", minutesToClock(totalNegativas))
+  totalRow("Saldo líquido do período (positivas − negativas)", minutesToHHMM(totalPositivas - totalNegativas))
 
-  const ws = XLSX.utils.aoa_to_sheet(rows)
-  ws["!merges"] = [
-    { s: { r: 0, c: 0 }, e: { r: 0, c: 11 } },
-    { s: { r: 1, c: 0 }, e: { r: 1, c: 11 } },
-  ]
-  ws["!cols"] = [
-    { wch: 5 }, { wch: 11 }, { wch: 5 }, { wch: 9 }, { wch: 12 }, { wch: 13 },
-    { wch: 9 }, { wch: 15 }, { wch: 12 }, { wch: 14 }, { wch: 30 }, { wch: 30 },
-  ]
+  sheet.addRow([])
+  sheet.addRow([])
+  const sigLineRow = sheet.addRow([])
+  sheet.mergeCells(sigLineRow.number, 1, sigLineRow.number, 4)
+  sigLineRow.getCell(1).border = { bottom: { style: "thin", color: { argb: INK } } }
+  const sigLabelRow = sheet.addRow([`Assinatura de ${emp.nome}`])
+  sigLabelRow.getCell(1).font = { italic: true, size: 10, color: { argb: "FF666666" } }
 
-  const wb = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, ws, reportTipo === "semanal" ? "Semana" : "Mês")
-
-  const filename = `folha-ponto-${emp.nome.replace(/\s+/g, "_")}-${reportTipo}-${reportTipo === "semanal" ? periodRange.start : espelhoMonth}.xlsx`
-  const wbout = XLSX.write(wb, { bookType: "xlsx", type: "array" })
-  const blob = new Blob([wbout], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" })
-  triggerDownload(blob, filename)
-  return filename
+  return workbook.xlsx.writeBuffer()
 }
 
 export function exportEspelhoCSV(params) {
@@ -146,23 +226,32 @@ export function exportEspelhoCSV(params) {
     const s = summaries[day]
     if (s.status === "abonado") {
       rows.push([day, "", "Dia abonado", s.motivo, "0h00"])
-    } else if (s.semRegistro) {
-      rows.push([day, "", "Sem nenhum registro", "", minutesToHHMM(s.balance)])
+    } else if (s.status === "sem_registro") {
+      rows.push([day, "", isWeekend(day) ? "Fim de semana" : "Sem nenhum registro", "", "0h00"])
+    } else if (s.status === "incompleto") {
+      s.merged.forEach((p) => {
+        const hora = new Date(p.time).toLocaleTimeString("pt-BR", { hour12: false })
+        rows.push([day, hora, p.type, "Marcação incompleta nesse dia", ""])
+      })
     } else {
       s.merged.forEach((p) => {
-        const origem = p.incluida ? `Incluída: ${p.motivo}` : p.toleranciaAplicada ? "Dentro da tolerância (art. 58 §1º CLT)" : "Marcação original"
+        const origem = p.incluida ? `Incluída: ${p.motivo}` : "Marcação original"
         const hora = new Date(p.time).toLocaleTimeString("pt-BR", { hour12: false })
         rows.push([day, hora, p.type, origem, ""])
       })
-      rows.push([day, "", "", s.intervaloComputadoNaJornada ? "Total do dia (intervalo computado na jornada — estágio)" : "Total do dia", minutesToHHMM(s.balance)])
+      let totalLabel = s.intervaloComputadoNaJornada ? "Total do dia (intervalo computado na jornada — estágio)" : "Total do dia"
+      if (s.toleranciaAplicada) totalLabel += " — dentro da tolerância diária de 10min (art. 58 §1º CLT)"
+      rows.push([day, "", "", totalLabel, minutesToHHMM(s.balance)])
     }
   })
   rows.push([])
   rows.push(["Jornada do período (fixa)", minutesToHHMM(periodTargetMinutes)])
   rows.push(["Total trabalhado no período", minutesToHHMM(totalWorked)])
   rows.push(["Total de horas positivas", minutesToHHMM(totalPositivas)])
-  rows.push(["Total de horas negativas", minutesToHHMM(-totalNegativas)])
-  rows.push(["Saldo líquido do período", minutesToHHMM(totalWorked - periodTargetMinutes)])
+  rows.push(["Total de horas negativas", minutesToHHMM(totalNegativas)])
+  // Soma o saldo já ajustado pela tolerância de cada dia (totalPositivas - totalNegativas) —
+  // não o total bruto trabalhado contra a meta do período, que perderia o perdão diário.
+  rows.push(["Saldo líquido do período", minutesToHHMM(totalPositivas - totalNegativas)])
   if (diasSemRegistro.length > 0) {
     rows.push([])
     rows.push(["Dias sem nenhum registro (verificar se é folga ou falta não justificada)", diasSemRegistro.join(", ")])
@@ -199,30 +288,47 @@ export function downloadComprovanteTexto(record, employee, empresa) {
 }
 
 export function downloadComprovanteXLSX(record, employee, empresa) {
-  const rows = [
-    ["Comprovante de Registro de Ponto do Trabalhador"],
-    [],
-    ["NSR", record.nsr],
-    ["Empregador", `${empresa.nome || "—"}${empresa.cnpj ? " · " + empresa.cnpj : ""}`],
-    ["Trabalhador", employee.nome],
-    ["CPF", formatCPF(employee.cpf)],
-    ["Data e hora", new Date(record.time).toLocaleString("pt-BR", { hour12: false })],
-    ["Tipo", record.type],
-    ["Hash (SHA-256)", record.hash || "indisponível"],
-    [],
-    ["Documento gerado por sistema de controle interno. Não é um REP-P certificado no INPI nem possui assinatura eletrônica qualificada ICP-Brasil."],
-  ]
-  const ws = XLSX.utils.aoa_to_sheet(rows)
-  ws["!cols"] = [{ wch: 18 }, { wch: 55 }]
-  ws["!merges"] = [
-    { s: { r: 0, c: 0 }, e: { r: 0, c: 1 } },
-    { s: { r: 10, c: 0 }, e: { r: 10, c: 1 } },
-  ]
-  const wb = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, ws, "Comprovante")
   const filename = `comprovante-ponto-${employee.nome.replace(/\s+/g, "_")}-${record.nsr}.xlsx`
-  const wbout = XLSX.write(wb, { bookType: "xlsx", type: "array" })
-  const blob = new Blob([wbout], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" })
-  triggerDownload(blob, filename)
+  buildComprovanteWorkbook(record, employee, empresa).then((buffer) => {
+    triggerDownload(new Blob([buffer], { type: XLSX_MIME }), filename)
+  })
   return filename
+}
+
+async function buildComprovanteWorkbook(record, employee, empresa) {
+  const workbook = new ExcelJS.Workbook()
+  const sheet = workbook.addWorksheet("Comprovante")
+  sheet.columns = [{ width: 18 }, { width: 55 }]
+
+  const titleRow = sheet.addRow(["Comprovante de Registro de Ponto do Trabalhador"])
+  sheet.mergeCells(titleRow.number, 1, titleRow.number, 2)
+  titleRow.getCell(1).font = { bold: true, size: 13, color: { argb: "FFFFFFFF" } }
+  titleRow.getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: INK } }
+  titleRow.getCell(1).alignment = { horizontal: "center" }
+  titleRow.height = 22
+  sheet.addRow([])
+
+  function fieldRow(label, value) {
+    const row = sheet.addRow([label, value])
+    row.getCell(1).font = { bold: true }
+    row.eachCell({ includeEmpty: true }, (cell) => { cell.border = ALL_BORDERS })
+  }
+  fieldRow("NSR", record.nsr)
+  fieldRow("Empregador", `${empresa.nome || "—"}${empresa.cnpj ? " · " + empresa.cnpj : ""}`)
+  fieldRow("Trabalhador", employee.nome)
+  fieldRow("CPF", formatCPF(employee.cpf))
+  fieldRow("Data e hora", new Date(record.time).toLocaleString("pt-BR", { hour12: false }))
+  fieldRow("Tipo", record.type)
+  fieldRow("Hash (SHA-256)", record.hash || "indisponível")
+
+  sheet.addRow([])
+  const noteRow = sheet.addRow([
+    "Documento gerado por sistema de controle interno. Não é um REP-P certificado no INPI nem possui " +
+    "assinatura eletrônica qualificada ICP-Brasil.",
+  ])
+  sheet.mergeCells(noteRow.number, 1, noteRow.number, 2)
+  noteRow.getCell(1).font = { italic: true, size: 9, color: { argb: "FF666666" } }
+  noteRow.getCell(1).alignment = { wrapText: true }
+
+  return workbook.xlsx.writeBuffer()
 }

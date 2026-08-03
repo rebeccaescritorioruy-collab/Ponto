@@ -4,7 +4,7 @@ import { useEmployees } from "../../hooks/useEmployees"
 import { useEmployers } from "../../hooks/useEmployers"
 import {
   todayKey, weekRangeOf, monthRangeOf, buildDaySummary, empresaDoVinculo,
-  minutesToHHMM, monthLabelPt, weekdayAbbrev, formatTimeShort,
+  minutesToHHMM, monthLabelPt, weekdayAbbrev, formatTimeShort, isWeekend,
 } from "../../lib/calculo"
 import { exportEspelhoCSV, exportEspelhoXLSX } from "../../lib/export"
 import Card from "../ui/Card"
@@ -12,6 +12,7 @@ import Select from "../ui/Select"
 import TextField from "../ui/TextField"
 import Button from "../ui/Button"
 import Alert from "../ui/Alert"
+import EspelhoPreview from "./EspelhoPreview"
 
 function mapTreatmentRow(row) {
   return {
@@ -34,6 +35,7 @@ export default function EspelhoTab() {
   // Guarda o resultado junto da chave (cpf+período) que o originou — permite derivar
   // "loading"/"dados atuais" sem precisar de um setState síncrono dentro do efeito de busca.
   const [periodData, setPeriodData] = useState({ key: "", punches: [], treatmentsByDay: {} })
+  const [showPreview, setShowPreview] = useState(false)
   const [error, setError] = useState(null)
 
   const employee = employees.find((e) => e.cpf === cpf)
@@ -110,13 +112,26 @@ export default function EspelhoTab() {
     return (Number(employee.horasDiarias) || 0) * 5 * 60
   }, [employee, reportTipo])
 
+  // Soma o saldo já ajustado (pós-tolerância) de cada dia — a tolerância do art. 58 §1º da
+  // CLT vale por dia, então não dá pra derivar o saldo do período comparando só o total
+  // bruto trabalhado contra a meta do período (isso perderia o perdão diário de cada dia
+  // dentro da tolerância, e também misturaria dias positivos com negativos).
   const totalWorked = useMemo(() => Object.values(summaries).reduce((acc, s) => acc + s.minutes, 0), [summaries])
-  const totalBalance = totalWorked - periodTargetMinutes
-  const totalPositivas = totalBalance > 0 ? totalBalance : 0
-  const totalNegativas = totalBalance < 0 ? -totalBalance : 0
-  const diasSemRegistro = useMemo(
-    () => Object.keys(summaries).filter((d) => summaries[d].semRegistro && summaries[d].status !== "abonado").sort(),
+  const totalBalance = useMemo(() => Object.values(summaries).reduce((acc, s) => acc + s.balance, 0), [summaries])
+  const totalPositivas = useMemo(
+    () => Object.values(summaries).reduce((acc, s) => acc + (s.balance > 0 ? s.balance : 0), 0),
     [summaries]
+  )
+  const totalNegativas = useMemo(
+    () => Object.values(summaries).reduce((acc, s) => acc + (s.balance < 0 ? -s.balance : 0), 0),
+    [summaries]
+  )
+  // Só entram no alerta os dias úteis, já ocorridos, sem nenhum registro — fim de semana e
+  // dias futuros têm explicação própria (folga e "ainda não ocorreu"), não precisam de alerta.
+  const hoje = todayKey()
+  const diasSemRegistro = useMemo(
+    () => Object.keys(summaries).filter((d) => summaries[d].semRegistro && d <= hoje && !isWeekend(d)).sort(),
+    [summaries, hoje]
   )
 
   function exportParams() {
@@ -166,11 +181,36 @@ export default function EspelhoTab() {
                 </span>
               </p>
             </div>
-            <div className="flex gap-2">
-              <Button variant="secondary" onClick={() => exportEspelhoCSV(exportParams())}>Exportar CSV</Button>
-              <Button variant="secondary" onClick={() => exportEspelhoXLSX(exportParams())}>Exportar XLSX</Button>
+            <div className="flex flex-wrap items-center gap-3">
+              <Button variant="secondary" onClick={() => setShowPreview((v) => !v)}>
+                {showPreview ? "Ocultar prévia" : "Pré-visualizar planilha"}
+              </Button>
+              <Button onClick={() => exportEspelhoXLSX(exportParams())}>Baixar planilha (Excel)</Button>
+              <button
+                onClick={() => exportEspelhoCSV(exportParams())}
+                className="text-xs text-neutral-500 underline hover:text-neutral-700"
+              >
+                exportar dados brutos em .csv
+              </button>
             </div>
           </div>
+
+          {showPreview && (
+            <div className="mb-6">
+              <p className="mb-2 text-xs text-neutral-500">
+                Prévia de como a planilha (Excel) vai sair — não precisa baixar pra conferir.
+              </p>
+              <EspelhoPreview
+                employee={employee}
+                empresa={empresaDoVinculo(employers, employee.vinculo)}
+                periodoCurto={`${periodRange.start} a ${periodRange.end}`}
+                summaries={summaries}
+                totalWorked={totalWorked}
+                totalPositivas={totalPositivas}
+                totalNegativas={totalNegativas}
+              />
+            </div>
+          )}
 
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
@@ -186,26 +226,38 @@ export default function EspelhoTab() {
               <tbody className="divide-y divide-neutral-100">
                 {Object.keys(summaries).sort().map((day) => {
                   const s = summaries[day]
+                  const futuro = day > hoje
+                  const semRegistroFimDeSemana = s.status === "sem_registro" && isWeekend(day) && !futuro
+                  const semHoras = s.status === "sem_registro" || s.status === "incompleto" || futuro
                   return (
                     <tr key={day}>
                       <td className="py-2 pr-3 text-neutral-900">
                         {weekdayAbbrev(day)} {day.slice(8, 10)}/{day.slice(5, 7)}
                       </td>
                       <td className="py-2 pr-3 text-neutral-600">
-                        {s.status === "abonado" ? "—" : (s.merged.map((p) => formatTimeShort(p.time)).join(" · ") || "—")}
+                        {s.status === "abonado" || futuro ? "—" : (s.merged.map((p) => formatTimeShort(p.time)).join(" · ") || "—")}
                       </td>
                       <td className="py-2 pr-3 text-neutral-600">
-                        {s.status === "sem_registro" ? "—" : minutesToHHMM(s.minutes)}
+                        {semHoras ? "—" : minutesToHHMM(s.minutes)}
                       </td>
                       <td className={`py-2 pr-3 font-medium ${s.balance < 0 ? "text-red-600" : s.balance > 0 ? "text-emerald-600" : "text-neutral-500"}`}>
-                        {s.status === "sem_registro" ? "—" : minutesToHHMM(s.balance)}
+                        {semHoras ? "—" : minutesToHHMM(s.balance)}
                       </td>
                       <td className="py-2 pr-3">
                         {s.status === "abonado" && (
                           <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">Abonado</span>
                         )}
-                        {s.status === "sem_registro" && (
+                        {futuro && (
+                          <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs font-medium text-neutral-500">Ainda não ocorreu</span>
+                        )}
+                        {!futuro && semRegistroFimDeSemana && (
+                          <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs font-medium text-neutral-500">Fim de semana</span>
+                        )}
+                        {!futuro && s.status === "sem_registro" && !semRegistroFimDeSemana && (
                           <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">Sem registro</span>
+                        )}
+                        {!futuro && s.status === "incompleto" && (
+                          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">Incompleto</span>
                         )}
                         {s.status === "normal" && s.toleranciaAplicada && (
                           <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs font-medium text-neutral-600">Tolerância aplicada</span>

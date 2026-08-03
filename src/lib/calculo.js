@@ -53,9 +53,8 @@ export function formatCNPJ(v) {
 export const PUNCH_TYPES = ["Entrada", "Início do intervalo", "Fim do intervalo", "Saída"]
 export const FALTA_MOTIVOS = ["Atestado médico", "Falta abonada", "Banco de horas / folga compensatória", "Férias", "Outro"]
 
-// art. 58, §1º da CLT — limite diário (soma das variações) e limite por marcação individual
+// art. 58, §1º da CLT — variação diária tolerada entre o total trabalhado e a carga horária
 export const TOLERANCIA_DIARIA_MIN = 10
-export const TOLERANCIA_POR_MARCACAO_MIN = 5
 
 /* Regimes de jornada fixos oferecidos no cadastro. As horas semanais e mensais
    são valores fechados (não calculados), conforme definido pelo escritório. */
@@ -115,13 +114,24 @@ export function intervaloContaComoJornada(vinculo, horasDiarias) {
 
 const MESES_PT = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
 const DIAS_SEMANA_ABREV = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"]
+const DIAS_SEMANA_COMPLETO = ["Domingo", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"]
 
 export function monthLabelPt(monthStr) {
   const [y, m] = monthStr.split("-").map(Number)
   return `${MESES_PT[m - 1]}/${y}`
 }
+function weekdayIndex(dayKey) {
+  return new Date(`${dayKey}T00:00:00`).getDay()
+}
 export function weekdayAbbrev(dayKey) {
-  return DIAS_SEMANA_ABREV[new Date(`${dayKey}T00:00:00`).getDay()]
+  return DIAS_SEMANA_ABREV[weekdayIndex(dayKey)]
+}
+export function weekdayFullPt(dayKey) {
+  return DIAS_SEMANA_COMPLETO[weekdayIndex(dayKey)]
+}
+export function isWeekend(dayKey) {
+  const d = weekdayIndex(dayKey)
+  return d === 0 || d === 6
 }
 export function minutesToClock(min) {
   const abs = Math.max(0, Math.round(min || 0))
@@ -142,26 +152,15 @@ export function minutesToHHMM(min) {
 }
 
 export function calcWorkedMinutes(punches, incluirIntervalo = false) {
-  // Ordena pelo horário real (o que foi de fato batido/lançado), mas soma as durações usando
-  // timeCalculo quando existir — é o horário "efetivo" para fins de cálculo, que pode diferir do
-  // horário real exibido quando a tolerância do art. 58, §1º da CLT absorve a marcação.
   const sorted = [...punches].sort((a, b) => new Date(a.time) - new Date(b.time))
   let total = 0
   for (let i = 0; i < sorted.length - 1; i++) {
     const idx = i % 4
     if (idx === 0 || idx === 2 || (incluirIntervalo && idx === 1)) {
-      const tAtual = new Date(sorted[i].timeCalculo ?? sorted[i].time)
-      const tProximo = new Date(sorted[i + 1].timeCalculo ?? sorted[i + 1].time)
-      total += (tProximo - tAtual) / 60000
+      total += (new Date(sorted[i + 1].time) - new Date(sorted[i].time)) / 60000
     }
   }
   return Math.round(total)
-}
-
-function expectedTimeOnDay(dayKey, hhmm) {
-  if (!hhmm) return null
-  const d = new Date(`${dayKey}T${hhmm}:00`)
-  return isNaN(d.getTime()) ? null : d
 }
 
 /* Duração do intervalo intrajornada prevista, a partir da jornada diária (art. 71
@@ -191,32 +190,12 @@ export function formatIntervaloPrevisto(employee) {
   return intervaloContaComoJornada(employee?.vinculo, employee?.horasDiarias) ? `${texto} (computado dentro da jornada)` : texto
 }
 
-/* Deriva os horários previstos de início/fim do intervalo a partir da entrada
-   prevista e da jornada diária, centralizando o intervalo no meio do turno. */
-export function deriveIntervalSchedule(entradaPrevista, horasDiarias, intervaloMin) {
-  if (!entradaPrevista) return [null, null]
-  const workMin = (Number(horasDiarias) || 0) * 60
-  const [h, m] = entradaPrevista.split(":").map(Number)
-  const startMinutesOfDay = h * 60 + m
-  const inicioIntervaloMin = startMinutesOfDay + workMin / 2
-  const fimIntervaloMin = inicioIntervaloMin + intervaloMin
-  const toHHMM = (totalMin) => {
-    const hh = Math.floor(totalMin / 60) % 24
-    const mm = Math.round(totalMin % 60)
-    return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`
-  }
-  return [toHHMM(inicioIntervaloMin), toHHMM(fimIntervaloMin)]
-}
-
-/* Aplica a tolerância de variação de ponto (art. 58, §1º da CLT): variações de
-   até 5 min por marcação, com limite diário de 10 min, não são descontadas nem
-   contam como hora extra. Cada marcação é avaliada de forma independente — não
-   é tudo ou nada no dia: uma marcação com até 5 min de variação é tolerada
-   mesmo que outra marcação do mesmo dia passe de 5 min (essa outra nunca é
-   tolerada, e entra no cálculo pelo valor integral, não só o excedente). O
-   limite diário de 10 min incide sobre a soma das marcações que, isoladamente,
-   já estão dentro dos 5 min: se essa soma ultrapassar 10 min, nenhuma delas
-   fica tolerada naquele dia. */
+/* Aplica a tolerância de variação de ponto (art. 58, §1º da CLT) sobre o TOTAL do dia:
+   compara direto o total trabalhado com a carga horária contratada (não é preciso
+   cadastrar entrada/saída prevista). Se a diferença for de até 10 minutos pra mais ou
+   pra menos, o dia é tratado como batendo exatamente a carga horária (nem sobra, nem
+   falta). Se passar de 10 minutos, conta a diferença inteira — não só o excedente —
+   já que a lei não tolera "um pouco", tolera até o limite e nada além dele. */
 export function buildDaySummary(dayKey, punches, treatments, employee) {
   const horasDiarias = employee?.horasDiarias
   const expectedMinutes = (Number(horasDiarias) || 0) * 60
@@ -236,7 +215,7 @@ export function buildDaySummary(dayKey, punches, treatments, employee) {
   const inclusoes = treatments
     .filter((t) => t.kind === "inclusao")
     .map((t) => ({ nsr: null, type: t.tipoMarcacao, time: t.horario, incluida: true, motivo: t.motivo }))
-  let merged = [...punches, ...inclusoes].sort((a, b) => new Date(a.time) - new Date(b.time))
+  const merged = [...punches, ...inclusoes].sort((a, b) => new Date(a.time) - new Date(b.time))
   const semRegistro = merged.length === 0
 
   if (semRegistro) {
@@ -248,42 +227,27 @@ export function buildDaySummary(dayKey, punches, treatments, employee) {
     }
   }
 
-  const [inicioIntervaloDerivado, fimIntervaloDerivado] = deriveIntervalSchedule(
-    employee?.entradaPrevista, horasDiarias, intervaloEfetivoMinutos(employee)
-  )
-  const schedule = [
-    employee?.entradaPrevista, inicioIntervaloDerivado,
-    fimIntervaloDerivado, employee?.saidaPrevista,
-  ]
-  const hasSchedule = Boolean(employee?.entradaPrevista) && Boolean(employee?.saidaPrevista) && Number(horasDiarias) > 0
-  let toleranciaAplicada = false
-
-  if (hasSchedule && merged.length > 0) {
-    const deviations = merged.map((p, i) => {
-      const expected = expectedTimeOnDay(dayKey, schedule[i % 4])
-      return expected ? (new Date(p.time) - expected) / 60000 : 0
-    })
-    // "Candidata": marcação cuja variação, isoladamente, não passa de 5 min. Marcações que
-    // já excedem 5 min sozinhas nunca são candidatas — ficam sempre de fora da tolerância,
-    // com o valor integral computado, não importa o total do dia.
-    const candidatas = deviations.map((d) => Math.abs(d) <= TOLERANCIA_POR_MARCACAO_MIN)
-    const somaCandidatas = deviations.reduce((acc, d, i) => acc + (candidatas[i] ? Math.abs(d) : 0), 0)
-    const candidatasToleradas = somaCandidatas <= TOLERANCIA_DIARIA_MIN
-    merged = merged.map((p, i) => {
-      if (!candidatas[i] || !candidatasToleradas) return p // fora do limite por marcação, ou soma das candidatas passou de 10 min
-      const expected = expectedTimeOnDay(dayKey, schedule[i % 4])
-      // Mantém "time" com o horário real batido/lançado (o que aparece na tela e nos
-      // relatórios); só "timeCalculo" (usado no cálculo de minutos) vira o horário previsto,
-      // já que a tolerância diz respeito ao cálculo, não ao registro em si.
-      return expected ? { ...p, timeCalculo: expected.toISOString(), toleranciaAplicada: true } : p
-    })
-    toleranciaAplicada = merged.some((p) => p.toleranciaAplicada)
+  if (merged.length % 4 !== 0) {
+    // Faltou batida(s) nesse dia (ex.: sem a saída final) — calcular a hora trabalhada com o
+    // padrão de 4 marcações incompleto daria um número enganoso, então não calcula: só sinaliza
+    // pra administração completar o registro manualmente.
+    return {
+      minutes: 0, expectedMinutes, balance: 0, status: "incompleto",
+      merged, semRegistro: false, toleranciaAplicada: false,
+    }
   }
 
   const incluirIntervalo = intervaloContaComoJornada(employee?.vinculo, horasDiarias)
+  // "minutes" é sempre o que realmente foi trabalhado (a verdade dos pontos batidos) — a
+  // tolerância do art. 58 §1º da CLT não reescreve a hora trabalhada, só decide se a
+  // diferença em relação à carga horária conta ou não para o saldo/banco de horas.
   const minutes = calcWorkedMinutes(merged, incluirIntervalo)
+  const rawBalance = minutes - expectedMinutes
+  const toleranciaAplicada = Math.abs(rawBalance) <= TOLERANCIA_DIARIA_MIN
+  const balance = toleranciaAplicada ? 0 : rawBalance
+
   return {
-    minutes, expectedMinutes, balance: minutes - expectedMinutes, status: "normal",
+    minutes, expectedMinutes, balance, status: "normal",
     merged, semRegistro, toleranciaAplicada, intervaloComputadoNaJornada: incluirIntervalo,
   }
 }
