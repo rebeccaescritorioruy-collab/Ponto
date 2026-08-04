@@ -96,9 +96,14 @@ export function empresaDoVinculo(employers, vinculo) {
 
 /* A Lei do Estágio (art. 10, Lei 11.788/2008) limita a jornada do estagiário a,
    no máximo, 6h diárias e 30h semanais — por isso o regime de 8h/dia não é
-   oferecido para estagiários. */
-export function jornadasDisponiveis(vinculo) {
-  return vinculo === "estagiario" ? JORNADAS_PRESETS.filter((j) => j.horasDiarias <= 6) : JORNADAS_PRESETS
+   oferecido para estagiários, EXCETO na exceção do art. 10 §2º: estágio de curso
+   que alterna teoria e prática pode ter jornada de até 40h semanais (8h/dia) nos
+   períodos sem aula presencial, desde que previsto no projeto pedagógico do curso
+   — daí o parâmetro comprovanteAlternancia, marcado manualmente no cadastro
+   quando o escritório tiver essa comprovação. */
+export function jornadasDisponiveis(vinculo, comprovanteAlternancia = false) {
+  if (vinculo !== "estagiario") return JORNADAS_PRESETS
+  return comprovanteAlternancia ? JORNADAS_PRESETS : JORNADAS_PRESETS.filter((j) => j.horasDiarias <= 6)
 }
 
 /* Para estagiários com jornada de 5h ou 6h/dia, o intervalo de 15 min é uma
@@ -151,12 +156,16 @@ export function minutesToHHMM(min) {
   return `${sign}${h}h${String(m).padStart(2, "0")}`
 }
 
-export function calcWorkedMinutes(punches, incluirIntervalo = false) {
+export function calcWorkedMinutes(punches, incluirIntervalo = false, cicloTamanho = 4) {
   const sorted = [...punches].sort((a, b) => new Date(a.time) - new Date(b.time))
   let total = 0
   for (let i = 0; i < sorted.length - 1; i++) {
-    const idx = i % 4
-    if (idx === 0 || idx === 2 || (incluirIntervalo && idx === 1)) {
+    const idx = i % cicloTamanho
+    // Ciclo de 2 (jornada contínua, sem intervalo): só Entrada→Saída. Ciclo de 4 (padrão):
+    // Entrada→Início intervalo e Fim intervalo→Saída sempre contam; o intervalo em si (idx 1)
+    // só conta pra estagiários de 5-6h, cujo intervalo é computado dentro da jornada.
+    const conta = cicloTamanho === 2 ? idx === 0 : (idx === 0 || idx === 2 || (incluirIntervalo && idx === 1))
+    if (conta) {
       total += (new Date(sorted[i + 1].time) - new Date(sorted[i].time)) / 60000
     }
   }
@@ -183,6 +192,13 @@ export function intervaloEfetivoMinutos(employee) {
   return custom !== null && custom !== undefined && custom !== "" ? Number(custom) : intervaloPrevistoMinutos(employee?.horasDiarias)
 }
 
+/* Jornada contínua (sem intervalo, ex.: regime de 4h/dia): o ciclo de marcação é só
+   Entrada/Saída, 2 marcações por dia — não faz sentido pedir Início/Fim do intervalo de
+   quem não tem intervalo previsto nenhum. */
+export function punchTypesForEmployee(employee) {
+  return intervaloEfetivoMinutos(employee) === 0 ? ["Entrada", "Saída"] : PUNCH_TYPES
+}
+
 export function formatIntervaloPrevisto(employee) {
   const min = intervaloEfetivoMinutos(employee)
   if (min === 0) return "Sem intervalo previsto"
@@ -198,57 +214,81 @@ export function formatIntervaloPrevisto(employee) {
    já que a lei não tolera "um pouco", tolera até o limite e nada além dele. */
 export function buildDaySummary(dayKey, punches, treatments, employee) {
   const horasDiarias = employee?.horasDiarias
-  const expectedMinutes = (Number(horasDiarias) || 0) * 60
-  const falta = treatments.find((t) => t.kind === "falta")
-  if (falta) {
-    return {
-      minutes: expectedMinutes,
-      expectedMinutes,
-      balance: 0,
-      status: "abonado",
-      motivo: falta.motivoCategoria + (falta.motivo ? ` — ${falta.motivo}` : ""),
-      merged: punches,
-      semRegistro: false,
-      toleranciaAplicada: false,
-    }
-  }
+  const baseExpectedMinutes = (Number(horasDiarias) || 0) * 60
+
   const inclusoes = treatments
     .filter((t) => t.kind === "inclusao")
     .map((t) => ({ nsr: null, type: t.tipoMarcacao, time: t.horario, incluida: true, motivo: t.motivo }))
   const merged = [...punches, ...inclusoes].sort((a, b) => new Date(a.time) - new Date(b.time))
+  // Jornada contínua (sem intervalo previsto, ex.: 4h/dia): o ciclo do dia é só
+  // Entrada/Saída (2 marcações), não Entrada/Início/Fim/Saída (4).
+  const cicloTamanho = intervaloEfetivoMinutos(employee) === 0 ? 2 : 4
+  const incluirIntervalo = intervaloContaComoJornada(employee?.vinculo, horasDiarias)
+
+  const falta = treatments.find((t) => t.kind === "falta")
+  if (falta) {
+    // Abonado zera o saldo do dia (não penaliza), mas mostra na tela o que realmente foi
+    // batido — não esconde atrás da meta cheia. Se o funcionário bateu ponto parcialmente
+    // (ex.: saiu mais cedo por atestado), o "trabalhado" reflete isso; o saldo continua 0.
+    const minutesReais = merged.length > 0 && merged.length % cicloTamanho === 0
+      ? calcWorkedMinutes(merged, incluirIntervalo, cicloTamanho)
+      : 0
+    return {
+      minutes: minutesReais,
+      // No total do período, um dia abonado conta a carga cheia (é esse o efeito do abono —
+      // credita o dia inteiro), mesmo mostrando só o que foi realmente batido no dia a dia.
+      minutesCreditadas: baseExpectedMinutes,
+      expectedMinutes: baseExpectedMinutes,
+      balance: 0,
+      status: "abonado",
+      motivo: falta.motivoCategoria + (falta.motivo ? ` — ${falta.motivo}` : ""),
+      merged,
+      semRegistro: false,
+      toleranciaAplicada: false,
+    }
+  }
+
+  // Carga reduzida (ex.: estagiário com prova na faculdade, que trabalha só metade da
+  // jornada naquele dia): diferente da falta abonada, aqui o funcionário trabalha de
+  // verdade — só que contra uma meta menor só naquele dia, com a mesma tolerância normal.
+  const cargaReduzida = treatments.find((t) => t.kind === "carga_reduzida")
+  const percentualCarga = cargaReduzida ? (Number(cargaReduzida.percentualCarga) || 50) : 100
+  const expectedMinutes = Math.round(baseExpectedMinutes * percentualCarga / 100)
   const semRegistro = merged.length === 0
 
   if (semRegistro) {
     // não sabemos se é folga (descanso semanal) ou falta não justificada — por isso não entra
     // no cálculo de saldo, só é listado à parte para o administrador verificar manualmente.
     return {
-      minutes: 0, expectedMinutes: 0, balance: 0, status: "sem_registro",
+      minutes: 0, minutesCreditadas: 0, expectedMinutes: 0, balance: 0, status: "sem_registro",
       merged: [], semRegistro: true, toleranciaAplicada: false,
     }
   }
 
-  if (merged.length % 4 !== 0) {
+  if (merged.length % cicloTamanho !== 0) {
     // Faltou batida(s) nesse dia (ex.: sem a saída final) — calcular a hora trabalhada com o
-    // padrão de 4 marcações incompleto daria um número enganoso, então não calcula: só sinaliza
-    // pra administração completar o registro manualmente.
+    // ciclo incompleto daria um número enganoso, então não calcula: só sinaliza pra
+    // administração completar o registro manualmente.
     return {
-      minutes: 0, expectedMinutes, balance: 0, status: "incompleto",
+      minutes: 0, minutesCreditadas: 0, expectedMinutes, balance: 0, status: "incompleto",
       merged, semRegistro: false, toleranciaAplicada: false,
     }
   }
 
-  const incluirIntervalo = intervaloContaComoJornada(employee?.vinculo, horasDiarias)
   // "minutes" é sempre o que realmente foi trabalhado (a verdade dos pontos batidos) — a
   // tolerância do art. 58 §1º da CLT não reescreve a hora trabalhada, só decide se a
   // diferença em relação à carga horária conta ou não para o saldo/banco de horas.
-  const minutes = calcWorkedMinutes(merged, incluirIntervalo)
+  const minutes = calcWorkedMinutes(merged, incluirIntervalo, cicloTamanho)
   const rawBalance = minutes - expectedMinutes
   const toleranciaAplicada = Math.abs(rawBalance) <= TOLERANCIA_DIARIA_MIN
   const balance = toleranciaAplicada ? 0 : rawBalance
 
   return {
-    minutes, expectedMinutes, balance, status: "normal",
+    minutes, minutesCreditadas: minutes, expectedMinutes, balance, status: "normal",
     merged, semRegistro, toleranciaAplicada, intervaloComputadoNaJornada: incluirIntervalo,
+    cargaReduzidaAplicada: Boolean(cargaReduzida),
+    cargaReduzidaMotivo: cargaReduzida?.motivo,
+    percentualCarga,
   }
 }
 

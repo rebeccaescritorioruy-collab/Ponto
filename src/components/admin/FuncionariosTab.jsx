@@ -14,7 +14,7 @@ import Alert from "../ui/Alert"
 function emptyEmpForm() {
   return {
     cpf: "", nome: "", matricula: "", cargo: "", ctps: "", lotacao: "", admissao: "", horario: "",
-    vinculo: "clt", horasDiarias: "8", jornadaMensalHoras: "200",
+    vinculo: "clt", horasDiarias: "8", jornadaMensalHoras: "200", comprovanteAlternancia: false,
     entradaPrevista: "", saidaPrevista: "", intervaloMinutos: "", senha: "", ativo: true,
   }
 }
@@ -38,7 +38,6 @@ export default function FuncionariosTab() {
     const cpfDigits = empForm.cpf.replace(/\D/g, "")
     if (cpfDigits.length !== 11) return setError("Informe um CPF válido (11 dígitos).")
     if (!empForm.nome.trim()) return setError("Informe o nome completo.")
-    if (!empForm.admissao) return setError("Informe a data de admissão.")
     if (!editingCpf && empForm.senha.length < 4) return setError("Defina uma senha de acesso com ao menos 4 caracteres.")
 
     let passwordHash = null
@@ -83,7 +82,7 @@ export default function FuncionariosTab() {
     flashNotice("Senha redefinida.")
   }
 
-  const disponiveis = jornadasDisponiveis(empForm.vinculo)
+  const disponiveis = jornadasDisponiveis(empForm.vinculo, empForm.comprovanteAlternancia)
 
   return (
     <div className="space-y-6">
@@ -95,9 +94,9 @@ export default function FuncionariosTab() {
           {editingCpf ? "Editar funcionário" : "Cadastrar funcionário"}
         </h3>
         <form className="grid grid-cols-1 gap-4 sm:grid-cols-2" onSubmit={handleSubmit}>
-          <TextField label="Nome completo" value={empForm.nome} onChange={(e) => setEmpForm({ ...empForm, nome: e.target.value })} />
+          <TextField label="Nome completo *" value={empForm.nome} onChange={(e) => setEmpForm({ ...empForm, nome: e.target.value })} />
           <TextField
-            label="CPF" value={formatCPF(empForm.cpf)} maxLength={14} disabled={!!editingCpf}
+            label="CPF *" value={formatCPF(empForm.cpf)} maxLength={14} disabled={!!editingCpf}
             onChange={(e) => setEmpForm({ ...empForm, cpf: e.target.value })}
           />
 
@@ -105,7 +104,7 @@ export default function FuncionariosTab() {
             label="Vínculo" value={empForm.vinculo}
             onChange={(e) => {
               const novoVinculo = e.target.value
-              const disp = jornadasDisponiveis(novoVinculo)
+              const disp = jornadasDisponiveis(novoVinculo, empForm.comprovanteAlternancia)
               const aindaValido = disp.some((j) => String(j.horasDiarias) === String(empForm.horasDiarias))
               setEmpForm({
                 ...empForm, vinculo: novoVinculo,
@@ -116,6 +115,26 @@ export default function FuncionariosTab() {
           >
             {VINCULOS.map((v) => <option key={v.value} value={v.value}>{v.label}</option>)}
           </Select>
+
+          {empForm.vinculo === "estagiario" && (
+            <label className="flex items-center gap-2 text-sm text-neutral-700 sm:col-span-2">
+              <input
+                type="checkbox"
+                checked={empForm.comprovanteAlternancia}
+                onChange={(e) => {
+                  const checked = e.target.checked
+                  const disp = jornadasDisponiveis(empForm.vinculo, checked)
+                  const aindaValido = disp.some((j) => String(j.horasDiarias) === String(empForm.horasDiarias))
+                  setEmpForm({
+                    ...empForm, comprovanteAlternancia: checked,
+                    horasDiarias: aindaValido ? empForm.horasDiarias : "",
+                    jornadaMensalHoras: aindaValido ? empForm.jornadaMensalHoras : "",
+                  })
+                }}
+              />
+              Curso com alternância teoria/prática comprovada (art. 10 §2º da Lei 11.788/2008) — libera jornada de até 8h/dia
+            </label>
+          )}
 
           <TextField label="Matrícula" value={empForm.matricula} onChange={(e) => setEmpForm({ ...empForm, matricula: e.target.value })} />
           <TextField label="Cargo / função" value={empForm.cargo} onChange={(e) => setEmpForm({ ...empForm, cargo: e.target.value })} />
@@ -156,9 +175,10 @@ export default function FuncionariosTab() {
           />
 
           <TextField
-            label={editingCpf ? "Nova senha (deixe em branco para manter)" : "Senha de acesso"} type="password"
+            label={editingCpf ? "Nova senha (deixe em branco para manter)" : "Senha de acesso *"} type="password"
             value={empForm.senha} onChange={(e) => setEmpForm({ ...empForm, senha: e.target.value })}
           />
+          <p className="text-xs text-neutral-500 sm:col-span-2">* Campos obrigatórios. Os demais podem ser preenchidos depois.</p>
 
           <div className="flex gap-2 pt-2 sm:col-span-2">
             <Button type="submit">{editingCpf ? "Salvar alterações" : "Cadastrar"}</Button>

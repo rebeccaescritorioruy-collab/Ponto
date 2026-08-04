@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { supabase } from "../../lib/supabase"
 import { useEmployees } from "../../hooks/useEmployees"
-import { todayKey, sha256, FALTA_MOTIVOS, PUNCH_TYPES, formatDateTime } from "../../lib/calculo"
+import { todayKey, sha256, FALTA_MOTIVOS, PUNCH_TYPES, punchTypesForEmployee, formatDateTime } from "../../lib/calculo"
 import Card from "../ui/Card"
 import Select from "../ui/Select"
 import TextField from "../ui/TextField"
@@ -12,7 +12,9 @@ export default function TratamentoTab() {
   const { employees } = useEmployees()
   const [cpf, setCpf] = useState("")
   const [date, setDate] = useState(todayKey())
+  const [lancamentoTipo, setLancamentoTipo] = useState("falta")
   const [motivoFalta, setMotivoFalta] = useState(FALTA_MOTIVOS[0])
+  const [percentualCarga, setPercentualCarga] = useState("50")
   const [motivo, setMotivo] = useState("")
   // Guarda os itens junto da chave (cpf+data) que os originou — permite derivar a lista
   // atual sem precisar de um setState síncrono dentro do efeito de busca.
@@ -28,6 +30,11 @@ export default function TratamentoTab() {
   const entryKey = cpf ? `${cpf}:${date}` : ""
   const existing = existingState.key === entryKey ? existingState.items : []
   const dayPunches = punchesState.key === entryKey ? punchesState.items : []
+  const selectedEmployee = employees.find((e) => e.cpf === cpf)
+  const tiposDisponiveis = punchTypesForEmployee(selectedEmployee)
+  // Se o funcionário selecionado mudar pra um regime sem intervalo, "Início/Fim do intervalo"
+  // deixam de ser opções válidas — cai pro primeiro tipo disponível em vez de manter escondido.
+  const effectiveAddType = tiposDisponiveis.includes(addType) ? addType : tiposDisponiveis[0]
 
   useEffect(() => {
     if (!cpf) return
@@ -51,15 +58,23 @@ export default function TratamentoTab() {
   async function handleSubmitFalta(e) {
     e.preventDefault()
     if (!cpf) return setError("Selecione o funcionário.")
-    if (!motivo.trim()) return setError("Informe o motivo da falta.")
 
-    const payload = { cpf, date, kind: "falta", motivo_categoria: motivoFalta, motivo: motivo.trim() }
+    let payload
+    if (lancamentoTipo === "falta") {
+      if (!motivo.trim()) return setError("Informe o motivo da falta.")
+      payload = { cpf, date, kind: "falta", motivo_categoria: motivoFalta, motivo: motivo.trim() }
+    } else {
+      const pct = Number(percentualCarga)
+      if (!pct || pct <= 0 || pct >= 100) return setError("Informe um percentual de carga entre 1 e 99.")
+      payload = { cpf, date, kind: "carga_reduzida", percentual_carga: pct, motivo: motivo.trim() }
+    }
+
     const { data, error } = await supabase.from("treatments").insert(payload).select().single()
     if (error) return setError(error.message)
     setExistingState({ key: entryKey, items: [...existing, data] })
     setMotivo("")
     setError(null)
-    setNotice("Falta abonada salva.")
+    setNotice(lancamentoTipo === "falta" ? "Falta abonada salva." : "Carga reduzida salva.")
     setTimeout(() => setNotice(null), 3000)
   }
 
@@ -113,9 +128,9 @@ export default function TratamentoTab() {
 
     // Já existe uma marcação desse tipo nesse dia? Edita ela em vez de duplicar — um dia só
     // pode ter uma Entrada, um Início de intervalo, um Fim de intervalo e uma Saída.
-    const existingPunch = dayPunches.find((p) => p.type === addType)
+    const existingPunch = dayPunches.find((p) => p.type === effectiveAddType)
     if (existingPunch) {
-      const newHash = await sha256(`${existingPunch.nsr}|${cpf}|${addType}|${time}`)
+      const newHash = await sha256(`${existingPunch.nsr}|${cpf}|${effectiveAddType}|${time}`)
       const { data: updated, error } = await supabase
         .from("punches").update({ time, hash: newHash }).eq("id", existingPunch.id).select().single()
       if (error) return setError(error.message)
@@ -127,16 +142,16 @@ export default function TratamentoTab() {
       })
       setAddTime("")
       setError(null)
-      setNotice(`Já existia uma marcação de "${addType}" nesse dia — o horário foi atualizado para ${addTime}, sem duplicar.`)
+      setNotice(`Já existia uma marcação de "${effectiveAddType}" nesse dia — o horário foi atualizado para ${addTime}, sem duplicar.`)
       setTimeout(() => setNotice(null), 3500)
       return
     }
 
     const { data: counter } = await supabase.from("nsr_counter").select("*").single()
     const nextNsr = (counter?.valor || 0) + 1
-    const hash = await sha256(`${nextNsr}|${cpf}|${addType}|${time}`)
+    const hash = await sha256(`${nextNsr}|${cpf}|${effectiveAddType}|${time}`)
     const { data: inserted, error } = await supabase
-      .from("punches").insert({ cpf, nsr: nextNsr, type: addType, time, hash }).select().single()
+      .from("punches").insert({ cpf, nsr: nextNsr, type: effectiveAddType, time, hash }).select().single()
     if (error) return setError(error.message)
     await supabase.from("nsr_counter").upsert({ id: 1, valor: nextNsr })
     setPunchesState({
@@ -199,8 +214,8 @@ export default function TratamentoTab() {
           )}
 
           <div className="flex flex-wrap items-end gap-2 border-t border-neutral-100 pt-4">
-            <Select label="Tipo de marcação" value={addType} onChange={(e) => setAddType(e.target.value)} className="w-52">
-              {PUNCH_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+            <Select label="Tipo de marcação" value={effectiveAddType} onChange={(e) => setAddType(e.target.value)} className="w-52">
+              {tiposDisponiveis.map((t) => <option key={t} value={t}>{t}</option>)}
             </Select>
             <TextField label="Horário" type="time" value={addTime} onChange={(e) => setAddTime(e.target.value)} className="w-28" />
             <Button onClick={addPunch}>Adicionar marcação</Button>
@@ -210,18 +225,39 @@ export default function TratamentoTab() {
 
       {cpf && (
         <Card>
-          <h3 className="mb-1 text-base font-semibold text-neutral-900">Lançar falta abonada</h3>
+          <h3 className="mb-1 text-base font-semibold text-neutral-900">Lançar falta abonada ou carga reduzida</h3>
           <p className="mb-4 text-xs text-neutral-500">
-            Pra dias em que o funcionário não trabalhou por um motivo justificado (atestado, férias etc.) — não
-            é usado pra corrigir marcação, isso é feito na lista acima.
+            Não é usado pra corrigir marcação — isso é feito na lista acima. Falta abonada conta o dia inteiro
+            como se tivesse trabalhado (ex.: atestado, férias). Carga reduzida é pra quando o funcionário
+            trabalha de verdade, só que uma fração do dia — ex.: estagiário com prova na faculdade, que
+            comparece só metade da jornada; a meta daquele dia cai proporcionalmente, e a tolerância normal
+            de 10min continua valendo em cima da meta reduzida.
           </p>
           <form className="grid grid-cols-1 gap-4 sm:grid-cols-2" onSubmit={handleSubmitFalta}>
-            <Select label="Categoria" value={motivoFalta} onChange={(e) => setMotivoFalta(e.target.value)}>
-              {FALTA_MOTIVOS.map((m) => <option key={m} value={m}>{m}</option>)}
+            <Select label="Tipo de lançamento" value={lancamentoTipo} onChange={(e) => setLancamentoTipo(e.target.value)}>
+              <option value="falta">Falta abonada</option>
+              <option value="carga_reduzida">Carga reduzida</option>
             </Select>
-            <TextField label="Motivo / observação" value={motivo} onChange={(e) => setMotivo(e.target.value)} />
+
+            {lancamentoTipo === "falta" ? (
+              <Select label="Categoria" value={motivoFalta} onChange={(e) => setMotivoFalta(e.target.value)}>
+                {FALTA_MOTIVOS.map((m) => <option key={m} value={m}>{m}</option>)}
+              </Select>
+            ) : (
+              <TextField
+                label="Percentual da jornada exigido nesse dia" type="number" min="1" max="99" step="5"
+                placeholder="ex.: 50 para metade da carga"
+                value={percentualCarga} onChange={(e) => setPercentualCarga(e.target.value)}
+              />
+            )}
+
+            <TextField
+              label="Motivo / observação" className="sm:col-span-2"
+              placeholder={lancamentoTipo === "carga_reduzida" ? "ex.: Prova na faculdade" : ""}
+              value={motivo} onChange={(e) => setMotivo(e.target.value)}
+            />
             <div className="sm:col-span-2">
-              <Button type="submit">Salvar falta abonada</Button>
+              <Button type="submit">{lancamentoTipo === "falta" ? "Salvar falta abonada" : "Salvar carga reduzida"}</Button>
             </div>
           </form>
         </Card>
@@ -235,7 +271,9 @@ export default function TratamentoTab() {
               <li key={t.id} className="flex items-center justify-between gap-3 py-2 text-sm">
                 <div>
                   <p className="text-neutral-900">
-                    {t.kind === "falta" ? `Falta: ${t.motivo_categoria}` : `Inclusão (legado): ${t.tipo_marcacao} às ${formatDateTime(t.horario)}`}
+                    {t.kind === "falta" && `Falta: ${t.motivo_categoria}`}
+                    {t.kind === "carga_reduzida" && `Carga reduzida: ${t.percentual_carga}% da jornada`}
+                    {t.kind === "inclusao" && `Inclusão (legado): ${t.tipo_marcacao} às ${formatDateTime(t.horario)}`}
                   </p>
                   {t.motivo && <p className="text-xs text-neutral-500">{t.motivo}</p>}
                 </div>

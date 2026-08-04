@@ -21,6 +21,7 @@ function mapTreatmentRow(row) {
     motivo: row.motivo,
     tipoMarcacao: row.tipo_marcacao,
     horario: row.horario,
+    percentualCarga: row.percentual_carga,
   }
 }
 
@@ -116,7 +117,9 @@ export default function EspelhoTab() {
   // CLT vale por dia, então não dá pra derivar o saldo do período comparando só o total
   // bruto trabalhado contra a meta do período (isso perderia o perdão diário de cada dia
   // dentro da tolerância, e também misturaria dias positivos com negativos).
-  const totalWorked = useMemo(() => Object.values(summaries).reduce((acc, s) => acc + s.minutes, 0), [summaries])
+  // Usa minutesCreditadas (não minutes) pro total: um dia abonado credita a carga cheia no
+  // total do período, mesmo mostrando só o que foi realmente batido na linha daquele dia.
+  const totalWorked = useMemo(() => Object.values(summaries).reduce((acc, s) => acc + s.minutesCreditadas, 0), [summaries])
   const totalBalance = useMemo(() => Object.values(summaries).reduce((acc, s) => acc + s.balance, 0), [summaries])
   const totalPositivas = useMemo(
     () => Object.values(summaries).reduce((acc, s) => acc + (s.balance > 0 ? s.balance : 0), 0),
@@ -235,7 +238,7 @@ export default function EspelhoTab() {
                         {weekdayAbbrev(day)} {day.slice(8, 10)}/{day.slice(5, 7)}
                       </td>
                       <td className="py-2 pr-3 text-neutral-600">
-                        {s.status === "abonado" || futuro ? "—" : (s.merged.map((p) => formatTimeShort(p.time)).join(" · ") || "—")}
+                        {futuro ? "—" : (s.merged.map((p) => formatTimeShort(p.time)).join(" · ") || "—")}
                       </td>
                       <td className="py-2 pr-3 text-neutral-600">
                         {semHoras ? "—" : minutesToHHMM(s.minutes)}
@@ -258,6 +261,11 @@ export default function EspelhoTab() {
                         )}
                         {!futuro && s.status === "incompleto" && (
                           <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">Incompleto</span>
+                        )}
+                        {s.status === "normal" && s.cargaReduzidaAplicada && (
+                          <span className="mr-1 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
+                            Carga reduzida ({s.percentualCarga}%)
+                          </span>
                         )}
                         {s.status === "normal" && s.toleranciaAplicada && (
                           <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs font-medium text-neutral-600">Tolerância aplicada</span>

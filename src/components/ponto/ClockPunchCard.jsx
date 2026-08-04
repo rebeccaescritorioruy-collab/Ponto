@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import Card from "../ui/Card"
 import Button from "../ui/Button"
-import { formatClock, formatDateHeader, formatTime, PUNCH_TYPES } from "../../lib/calculo"
+import { formatClock, formatDateHeader, formatTime, punchTypesForEmployee } from "../../lib/calculo"
 
 const PUNCH_COLORS = {
   "Entrada": "bg-emerald-500",
@@ -17,7 +17,8 @@ export default function ClockPunchCard({ employee, punches, onPunch, stamping, o
     return () => clearInterval(t)
   }, [])
 
-  const nextType = punches.length ? PUNCH_TYPES[punches.length % 4] : PUNCH_TYPES[0]
+  const tipos = punchTypesForEmployee(employee)
+  const nextType = tipos[punches.length % tipos.length]
 
   return (
     <Card>

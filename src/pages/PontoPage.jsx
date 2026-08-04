@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react"
 import { supabase } from "../lib/supabase"
 import { useSession } from "../hooks/useSession"
 import { useEmployers } from "../hooks/useEmployers"
-import { todayKey, sha256, PUNCH_TYPES, empresaDoVinculo } from "../lib/calculo"
+import { todayKey, sha256, punchTypesForEmployee, empresaDoVinculo } from "../lib/calculo"
 import { buildComprovanteText, downloadComprovanteTexto, downloadComprovanteXLSX } from "../lib/export"
 import EmployeeLoginForm from "../components/ponto/EmployeeLoginForm"
 import ClockPunchCard from "../components/ponto/ClockPunchCard"
@@ -72,7 +72,8 @@ export default function PontoPage() {
     try {
       const { data: counter } = await supabase.from("nsr_counter").select("*").single()
       const nextNsr = (counter?.valor || 0) + 1
-      const nextType = PUNCH_TYPES[punches.length % 4]
+      const tipos = punchTypesForEmployee(loggedInEmployee)
+      const nextType = tipos[punches.length % tipos.length]
       const time = new Date().toISOString()
       const hash = await sha256(`${nextNsr}|${loggedInEmployee.cpf}|${nextType}|${time}`)
       const { data: inserted, error: insertError } = await supabase

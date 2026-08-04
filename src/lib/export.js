@@ -78,6 +78,15 @@ export function computeEspelhoRows(summaries) {
     if (futuro) {
       observacao = "Ainda não ocorreu — preencha os horários quando o dia acontecer"
     } else if (s.status === "abonado") {
+      // Abonado zera o saldo (não penaliza), mas mostra o que realmente foi batido — não
+      // esconde atrás da meta cheia do dia.
+      s.merged.forEach((p) => {
+        const hhmm = `${String(new Date(p.time).getHours()).padStart(2, "0")}:${String(new Date(p.time).getMinutes()).padStart(2, "0")}`
+        if (p.type === "Entrada" && !entrada) entrada = hhmm
+        if (p.type === "Início do intervalo" && !saidaIntervalo) saidaIntervalo = hhmm
+        if (p.type === "Fim do intervalo" && !retornoIntervalo) retornoIntervalo = hhmm
+        if (p.type === "Saída" && !saida) saida = hhmm
+      })
       horasTrabalhadas = minutesToClock(s.minutes)
       horasPositivas = "0:00"
       horasNegativas = "0:00"
@@ -112,6 +121,10 @@ export function computeEspelhoRows(summaries) {
       }
       if (s.intervaloComputadoNaJornada) {
         observacao = observacao ? `${observacao}; Intervalo computado na jornada (estágio)` : "Intervalo computado na jornada (estágio)"
+      }
+      if (s.cargaReduzidaAplicada) {
+        const nota = `Carga reduzida (${s.percentualCarga}%)${s.cargaReduzidaMotivo ? ": " + s.cargaReduzidaMotivo : ""}`
+        observacao = observacao ? `${observacao}; ${nota}` : nota
       }
     }
 

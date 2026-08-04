@@ -17,9 +17,16 @@ function mapRow(row) {
     entradaPrevista: row.entrada_prevista,
     saidaPrevista: row.saida_prevista,
     intervaloMinutos: row.intervalo_minutos,
+    comprovanteAlternancia: row.comprovante_alternancia || false,
     ativo: row.ativo,
     passwordHash: row.password_hash,
   }
+}
+
+// Postgres rejeita "" como valor de date/time (colunas tipadas) — só aceita um valor válido ou
+// null. Como agora esses campos são opcionais no cadastro, precisam virar null quando vazios.
+function emptyToNull(v) {
+  return v === "" || v === undefined ? null : v
 }
 
 function toRow(emp) {
@@ -30,14 +37,15 @@ function toRow(emp) {
     cargo: emp.cargo,
     ctps: emp.ctps,
     lotacao: emp.lotacao,
-    admissao: emp.admissao,
+    admissao: emptyToNull(emp.admissao),
     horario: emp.horario,
     vinculo: emp.vinculo || "clt",
     horas_diarias: emp.horasDiarias,
     jornada_mensal_horas: emp.jornadaMensalHoras,
-    entrada_prevista: emp.entradaPrevista,
-    saida_prevista: emp.saidaPrevista,
-    intervalo_minutos: emp.intervaloMinutos === "" ? null : emp.intervaloMinutos,
+    entrada_prevista: emptyToNull(emp.entradaPrevista),
+    saida_prevista: emptyToNull(emp.saidaPrevista),
+    intervalo_minutos: emptyToNull(emp.intervaloMinutos),
+    comprovante_alternancia: Boolean(emp.comprovanteAlternancia),
     ativo: emp.ativo,
     password_hash: emp.passwordHash ?? null,
   }
