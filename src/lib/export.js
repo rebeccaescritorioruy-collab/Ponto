@@ -126,6 +126,14 @@ export function computeEspelhoRows(summaries) {
         const nota = `Carga reduzida (${s.percentualCarga}%)${s.cargaReduzidaMotivo ? ": " + s.cargaReduzidaMotivo : ""}`
         observacao = observacao ? `${observacao}; ${nota}` : nota
       }
+      if (s.riscoJornadaEstagio) {
+        const nota = "⚠ Jornada de estágio excedida — risco de caracterização de vínculo empregatício (art. 3º §2º Lei 11.788/2008)"
+        observacao = observacao ? `${observacao}; ${nota}` : nota
+      }
+      if (s.horaExtraAcimaDoLimite) {
+        const nota = "⚠ Hora extra acima de 2h/dia (art. 61 CLT) — confirmar se é caso excepcional"
+        observacao = observacao ? `${observacao}; ${nota}` : nota
+      }
     }
 
     return {
@@ -238,7 +246,13 @@ export function exportEspelhoCSV(params) {
   Object.keys(summaries).sort().forEach((day) => {
     const s = summaries[day]
     if (s.status === "abonado") {
-      rows.push([day, "", "Dia abonado", s.motivo, "0h00"])
+      if (s.merged.length > 0) {
+        s.merged.forEach((p) => {
+          const hora = new Date(p.time).toLocaleTimeString("pt-BR", { hour12: false })
+          rows.push([day, hora, p.type, "Abonado — marcação real do dia", ""])
+        })
+      }
+      rows.push([day, "", "", `Dia abonado: ${s.motivo || ""} (trabalhado: ${minutesToHHMM(s.minutes)})`, "0h00"])
     } else if (s.status === "sem_registro") {
       rows.push([day, "", isWeekend(day) ? "Fim de semana" : "Sem nenhum registro", "", "0h00"])
     } else if (s.status === "incompleto") {

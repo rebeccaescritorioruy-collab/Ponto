@@ -5,6 +5,7 @@ import { useEmployers } from "../../hooks/useEmployers"
 import {
   todayKey, weekRangeOf, monthRangeOf, buildDaySummary, empresaDoVinculo,
   minutesToHHMM, monthLabelPt, weekdayAbbrev, formatTimeShort, isWeekend,
+  limiteSemanalEstagioMinutos,
 } from "../../lib/calculo"
 import { exportEspelhoCSV, exportEspelhoXLSX } from "../../lib/export"
 import Card from "../ui/Card"
@@ -137,6 +138,26 @@ export default function EspelhoTab() {
     [summaries, hoje]
   )
 
+  // Limite semanal do estágio (art. 10 Lei 11.788/2008) — agrupa os dias já ocorridos por
+  // semana (segunda a domingo) e soma o trabalhado de verdade, comparando com o teto contratado.
+  // Vale tanto na visão mensal quanto semanal, já que uma semana "estourada" pode passar
+  // despercebida olhando só o mês inteiro.
+  const semanasExcedidasEstagio = useMemo(() => {
+    if (!employee) return []
+    const limite = limiteSemanalEstagioMinutos(employee)
+    if (!limite) return []
+    const porSemana = {}
+    Object.keys(summaries).forEach((day) => {
+      if (day > hoje) return
+      const { start } = weekRangeOf(day)
+      porSemana[start] = (porSemana[start] || 0) + summaries[day].minutes
+    })
+    return Object.entries(porSemana)
+      .filter(([, minutos]) => minutos > limite)
+      .map(([semanaInicio, minutos]) => ({ semanaInicio, minutos, excedente: minutos - limite }))
+      .sort((a, b) => a.semanaInicio.localeCompare(b.semanaInicio))
+  }, [summaries, employee, hoje])
+
   function exportParams() {
     return {
       employee, empresa: empresaDoVinculo(employers, employee.vinculo), reportTipo, periodRange,
@@ -171,7 +192,22 @@ export default function EspelhoTab() {
       ) : loading ? (
         <p className="text-sm text-neutral-500">Carregando…</p>
       ) : (
-        <Card>
+        <>
+          {semanasExcedidasEstagio.length > 0 && (
+            <Alert tone="error">
+              ⚠ Limite semanal de estágio ultrapassado (art. 10 Lei 11.788/2008) — risco de caracterização de
+              vínculo empregatício:
+              <ul className="mt-1 list-disc pl-5">
+                {semanasExcedidasEstagio.map((s) => (
+                  <li key={s.semanaInicio}>
+                    Semana de {s.semanaInicio}: {minutesToHHMM(s.minutos)} trabalhado
+                    (excedeu em {minutesToHHMM(s.excedente)})
+                  </li>
+                ))}
+              </ul>
+            </Alert>
+          )}
+          <Card>
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="text-sm text-neutral-500">
@@ -270,6 +306,22 @@ export default function EspelhoTab() {
                         {s.status === "normal" && s.toleranciaAplicada && (
                           <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs font-medium text-neutral-600">Tolerância aplicada</span>
                         )}
+                        {s.status === "normal" && s.riscoJornadaEstagio && (
+                          <span
+                            title="Estagiário além da carga contratada — risco de caracterizar vínculo empregatício (art. 3º §2º Lei 11.788/2008)"
+                            className="ml-1 rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700"
+                          >
+                            ⚠ Jornada de estágio excedida
+                          </span>
+                        )}
+                        {s.status === "normal" && s.horaExtraAcimaDoLimite && (
+                          <span
+                            title="Mais de 2h extras no dia — só permitido em casos excepcionais (art. 61 CLT)"
+                            className="ml-1 rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700"
+                          >
+                            ⚠ Hora extra acima de 2h/dia
+                          </span>
+                        )}
                       </td>
                     </tr>
                   )
@@ -283,7 +335,8 @@ export default function EspelhoTab() {
               Dias sem nenhum registro (verificar se é folga/DSR ou falta não justificada): {diasSemRegistro.join(", ")}
             </p>
           )}
-        </Card>
+          </Card>
+        </>
       )}
     </div>
   )

@@ -83,6 +83,12 @@ export default function FuncionariosTab() {
   }
 
   const disponiveis = jornadasDisponiveis(empForm.vinculo, empForm.comprovanteAlternancia)
+  // Art. 71 CLT fixa só o MÍNIMO de intervalo por faixa de jornada — um valor customizado
+  // abaixo disso só é válido com previsão em convenção/acordo coletivo (art. 611-A, VII),
+  // então não bloqueia o cadastro, só avisa pra confirmar que existe essa previsão.
+  const minimoLegalIntervalo = intervaloPrevistoMinutos(empForm.horasDiarias)
+  const intervaloAbaixoDoMinimo = empForm.intervaloMinutos !== ""
+    && Number(empForm.intervaloMinutos) < minimoLegalIntervalo
 
   return (
     <div className="space-y-6">
@@ -167,12 +173,20 @@ export default function FuncionariosTab() {
           <TextField label="Entrada prevista" type="time" value={empForm.entradaPrevista} onChange={(e) => setEmpForm({ ...empForm, entradaPrevista: e.target.value })} />
           <TextField label="Saída prevista" type="time" value={empForm.saidaPrevista} onChange={(e) => setEmpForm({ ...empForm, saidaPrevista: e.target.value })} />
 
-          <TextField
-            label="Duração do intervalo (minutos)" type="number" min="0" step="5"
-            placeholder={`Mínimo legal: ${intervaloPrevistoMinutos(empForm.horasDiarias)} min`}
-            value={empForm.intervaloMinutos}
-            onChange={(e) => setEmpForm({ ...empForm, intervaloMinutos: e.target.value })}
-          />
+          <div>
+            <TextField
+              label="Duração do intervalo (minutos)" type="number" min="0" step="5"
+              placeholder={`Mínimo legal: ${minimoLegalIntervalo} min`}
+              value={empForm.intervaloMinutos}
+              onChange={(e) => setEmpForm({ ...empForm, intervaloMinutos: e.target.value })}
+            />
+            {intervaloAbaixoDoMinimo && (
+              <p className="mt-1 text-xs text-amber-700">
+                ⚠ Abaixo do mínimo legal ({minimoLegalIntervalo}min, art. 71 CLT) para {empForm.horasDiarias}h/dia.
+                Só é válido com previsão em convenção/acordo coletivo.
+              </p>
+            )}
+          </div>
 
           <TextField
             label={editingCpf ? "Nova senha (deixe em branco para manter)" : "Senha de acesso *"} type="password"
@@ -220,7 +234,13 @@ export default function FuncionariosTab() {
                     <td className="py-2 pr-4 text-neutral-600">{vinculoLabel(e.vinculo)}</td>
                     <td className="py-2 pr-4 text-neutral-600">{e.cargo}</td>
                     <td className="py-2 pr-4 text-neutral-600">{formatRegimeResumo(e.horasDiarias, e.jornadaMensalHoras)}</td>
-                    <td className="py-2 pr-4 text-neutral-600">{formatIntervaloPrevisto(e)}</td>
+                    <td className="py-2 pr-4 text-neutral-600">
+                      {formatIntervaloPrevisto(e)}
+                      {e.intervaloMinutos !== null && e.intervaloMinutos !== undefined
+                        && Number(e.intervaloMinutos) < intervaloPrevistoMinutos(e.horasDiarias) && (
+                        <span title="Abaixo do mínimo legal (art. 71 CLT)" className="ml-1 text-amber-600">⚠</span>
+                      )}
+                    </td>
                     <td className="py-2 pr-4">
                       <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${e.ativo ? "bg-emerald-100 text-emerald-700" : "bg-neutral-100 text-neutral-500"}`}>
                         {e.ativo ? "Ativo" : "Inativo"}

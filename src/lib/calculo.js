@@ -106,6 +106,16 @@ export function jornadasDisponiveis(vinculo, comprovanteAlternancia = false) {
   return comprovanteAlternancia ? JORNADAS_PRESETS : JORNADAS_PRESETS.filter((j) => j.horasDiarias <= 6)
 }
 
+/* Limite semanal do estágio em minutos (art. 10 Lei 11.788/2008): 30h/semana no regime normal,
+   ou 40h/semana na exceção do §2º (curso com alternância comprovada). Não estagiário não tem
+   limite específico daqui (a CLT trata separadamente, art. 59). */
+export function limiteSemanalEstagioMinutos(employee) {
+  if (employee?.vinculo !== "estagiario") return null
+  const preset = getJornadaPreset(employee?.horasDiarias)
+  const horasSemanais = preset ? preset.horasSemanais : Math.round((Number(employee?.horasDiarias) || 0) * 5)
+  return horasSemanais * 60
+}
+
 /* Para estagiários com jornada de 5h ou 6h/dia, o intervalo de 15 min é uma
    anotação de bom senso do escritório, mas — diferente da CLT (art. 71, que
    sempre exclui o intervalo da jornada) — a Lei do Estágio não impõe que o
@@ -196,6 +206,7 @@ export function intervaloEfetivoMinutos(employee) {
    Entrada/Saída, 2 marcações por dia — não faz sentido pedir Início/Fim do intervalo de
    quem não tem intervalo previsto nenhum. */
 export function punchTypesForEmployee(employee) {
+  if (!employee) return PUNCH_TYPES
   return intervaloEfetivoMinutos(employee) === 0 ? ["Entrada", "Saída"] : PUNCH_TYPES
 }
 
@@ -289,6 +300,13 @@ export function buildDaySummary(dayKey, punches, treatments, employee) {
     cargaReduzidaAplicada: Boolean(cargaReduzida),
     cargaReduzidaMotivo: cargaReduzida?.motivo,
     percentualCarga,
+    // Estagiário trabalhando além da carga contratada não é "hora extra" — é a própria
+    // jornada da Lei 11.788/2008 sendo ultrapassada, o que arrisca caracterizar vínculo
+    // empregatício disfarçado (art. 3º §2º da lei). Sinaliza sempre que sobrar saldo positivo.
+    riscoJornadaEstagio: employee?.vinculo === "estagiario" && balance > 0,
+    // Hora extra além de 2h/dia só é permitida em casos excepcionais (art. 61 CLT) — sinaliza
+    // pra revisão manual, não bloqueia o registro.
+    horaExtraAcimaDoLimite: employee?.vinculo !== "estagiario" && balance > 120,
   }
 }
 
