@@ -8,6 +8,7 @@ import {
   limiteSemanalEstagioMinutos,
 } from "../../lib/calculo"
 import { exportEspelhoCSV, exportEspelhoXLSX } from "../../lib/export"
+import { mapsLink } from "../../lib/geo"
 import Card from "../ui/Card"
 import Select from "../ui/Select"
 import TextField from "../ui/TextField"
@@ -274,7 +275,28 @@ export default function EspelhoTab() {
                         {weekdayAbbrev(day)} {day.slice(8, 10)}/{day.slice(5, 7)}
                       </td>
                       <td className="py-2 pr-3 text-neutral-600">
-                        {futuro ? "—" : (s.merged.map((p) => formatTimeShort(p.time)).join(" · ") || "—")}
+                        {futuro || s.merged.length === 0 ? "—" : (
+                          <span className="inline-flex flex-wrap items-center gap-x-1">
+                            {s.merged.map((p, i) => {
+                              const link = mapsLink(p.latitude, p.longitude)
+                              return (
+                                <span key={p.id ?? i} className="inline-flex items-center">
+                                  {i > 0 && <span className="mr-1 text-neutral-300">·</span>}
+                                  {formatTimeShort(p.time)}
+                                  {link && (
+                                    <a
+                                      href={link} target="_blank" rel="noreferrer"
+                                      title="Ver localização dessa marcação"
+                                      className="ml-0.5 text-brand-600 hover:underline"
+                                    >
+                                      📍
+                                    </a>
+                                  )}
+                                </span>
+                              )
+                            })}
+                          </span>
+                        )}
                       </td>
                       <td className="py-2 pr-3 text-neutral-600">
                         {semHoras ? "—" : minutesToHHMM(s.minutes)}

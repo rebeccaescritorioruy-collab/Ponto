@@ -2,7 +2,10 @@ import { useCallback, useEffect, useState } from "react"
 import { supabase } from "../lib/supabase"
 
 function empty(vinculo) {
-  return { vinculo, nome: "", cnpj: "", endereco: "" }
+  return {
+    vinculo, nome: "", cnpj: "", endereco: "",
+    latitude: null, longitude: null, raio_metros: 150, bloqueio_localizacao_ativo: false,
+  }
 }
 
 /* Estagiários e celetistas são vinculados a empresas diferentes — esta hook mantém as

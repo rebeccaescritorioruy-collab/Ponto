@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { supabase } from "../../lib/supabase"
 import { useEmployees } from "../../hooks/useEmployees"
 import { todayKey, sha256, FALTA_MOTIVOS, PUNCH_TYPES, punchTypesForEmployee, formatDateTime } from "../../lib/calculo"
+import { mapsLink } from "../../lib/geo"
 import Card from "../ui/Card"
 import Select from "../ui/Select"
 import TextField from "../ui/TextField"
@@ -192,7 +193,20 @@ export default function TratamentoTab() {
             <ul className="mb-4 divide-y divide-neutral-100">
               {dayPunches.map((p) => (
                 <li key={p.id} className="flex items-center justify-between gap-3 py-2 text-sm">
-                  <span className="text-neutral-900">{p.type}</span>
+                  <div>
+                    <span className="text-neutral-900">{p.type}</span>
+                    <p className="text-xs text-neutral-400">
+                      IP: {p.ip || "indisponível"}
+                      {mapsLink(p.latitude, p.longitude) && (
+                        <>
+                          {" · "}
+                          <a href={mapsLink(p.latitude, p.longitude)} target="_blank" rel="noreferrer" className="text-brand-600 hover:underline">
+                            Ver localização
+                          </a>
+                        </>
+                      )}
+                    </p>
+                  </div>
                   {editingPunchId === p.id ? (
                     <div className="flex items-center gap-2">
                       <TextField type="time" value={editPunchTime} onChange={(e) => setEditPunchTime(e.target.value)} className="w-28" />

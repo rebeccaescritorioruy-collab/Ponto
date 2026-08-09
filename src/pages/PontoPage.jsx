@@ -4,6 +4,7 @@ import { useSession } from "../hooks/useSession"
 import { useEmployers } from "../hooks/useEmployers"
 import { todayKey, sha256, punchTypesForEmployee, empresaDoVinculo } from "../lib/calculo"
 import { buildComprovanteText, downloadComprovanteTexto, downloadComprovanteXLSX } from "../lib/export"
+import { collectPunchOrigin, distanceMeters } from "../lib/geo"
 import EmployeeLoginForm from "../components/ponto/EmployeeLoginForm"
 import ClockPunchCard from "../components/ponto/ClockPunchCard"
 import ComprovanteCard from "../components/ponto/ComprovanteCard"
@@ -60,6 +61,8 @@ export default function PontoPage() {
     }
   }
 
+  const empresa = loggedInEmployee ? empresaDoVinculo(employers, loggedInEmployee.vinculo) : null
+
   async function handleLogin() {
     const ok = await loginEmployee(loginCpf, loginPassword)
     if (ok) setLoginPassword("")
@@ -70,6 +73,36 @@ export default function PontoPage() {
     setStamping(true)
     setEmployeeError(null)
     try {
+      // Coleta IP/localização primeiro — a localização é sempre obrigatória pra bater o
+      // ponto (independente de bloqueio por endereço específico estar configurado ou não),
+      // então precisa confirmar antes de decidir se registra.
+      const { ip, latitude, longitude, accuracyM, locationError } = await collectPunchOrigin()
+
+      if (latitude === null || longitude === null) {
+        setEmployeeError(
+          "É necessário autorizar o acesso à localização do navegador para bater o ponto. "
+          + "Permita o acesso (ícone de localização na barra de endereço) e tente de novo."
+        )
+        setStamping(false)
+        return
+      }
+
+      const exigeLocalizacaoEspecifica = empresa?.bloqueio_localizacao_ativo
+        && empresa?.latitude !== null && empresa?.latitude !== undefined
+        && empresa?.longitude !== null && empresa?.longitude !== undefined
+      if (exigeLocalizacaoEspecifica) {
+        const dist = distanceMeters(latitude, longitude, empresa.latitude, empresa.longitude)
+        const raio = empresa.raio_metros || 150
+        if (dist > raio) {
+          setEmployeeError(
+            `Você está a ${Math.round(dist)}m do local exigido pra bater o ponto (máximo permitido: ${raio}m). `
+            + "Ponto não registrado."
+          )
+          setStamping(false)
+          return
+        }
+      }
+
       const { data: counter } = await supabase.from("nsr_counter").select("*").single()
       const nextNsr = (counter?.valor || 0) + 1
       const tipos = punchTypesForEmployee(loggedInEmployee)
@@ -78,7 +111,10 @@ export default function PontoPage() {
       const hash = await sha256(`${nextNsr}|${loggedInEmployee.cpf}|${nextType}|${time}`)
       const { data: inserted, error: insertError } = await supabase
         .from("punches")
-        .insert({ cpf: loggedInEmployee.cpf, nsr: nextNsr, type: nextType, time, hash })
+        .insert({
+          cpf: loggedInEmployee.cpf, nsr: nextNsr, type: nextType, time, hash,
+          ip, latitude, longitude, accuracy_m: accuracyM, location_error: locationError,
+        })
         .select()
         .single()
       if (insertError) throw insertError
@@ -103,8 +139,6 @@ export default function PontoPage() {
       setTimeout(() => setNotice(null), 2500)
     }
   }
-
-  const empresa = loggedInEmployee ? empresaDoVinculo(employers, loggedInEmployee.vinculo) : null
 
   async function handleCopyComprovante() {
     if (!lastReceipt || !loggedInEmployee) return

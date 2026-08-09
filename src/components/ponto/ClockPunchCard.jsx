@@ -42,6 +42,11 @@ export default function ClockPunchCard({ employee, punches, onPunch, stamping, o
         <Button onClick={onPunch} disabled={stamping} className="mt-2 px-8 py-3 text-base">
           {stamping ? "Registrando…" : `Bater ponto · ${nextType}`}
         </Button>
+        <p className="mt-1 max-w-xs text-center text-[11px] text-neutral-400">
+          O IP e a localização do dispositivo são registrados em cada marcação, para fins de
+          auditoria do ponto. É necessário autorizar a permissão de localização do navegador
+          para conseguir bater o ponto.
+        </p>
       </div>
 
       <div className="mt-6">

@@ -1,8 +1,10 @@
 import Card from "../ui/Card"
 import Button from "../ui/Button"
 import { formatDateTime } from "../../lib/calculo"
+import { mapsLink } from "../../lib/geo"
 
 export default function ComprovanteCard({ receipt, status, onCopy, onDownload, onDownloadXLSX }) {
+  const link = mapsLink(receipt.latitude, receipt.longitude)
   return (
     <Card className="border-emerald-200 bg-emerald-50/50">
       <h3 className="mb-2 text-sm font-semibold text-emerald-800">Ponto registrado</h3>
@@ -13,6 +15,18 @@ export default function ComprovanteCard({ receipt, status, onCopy, onDownload, o
         <dd className="text-neutral-900">{receipt.type}</dd>
         <dt className="text-neutral-500">Data e hora</dt>
         <dd className="text-neutral-900">{formatDateTime(receipt.time)}</dd>
+        <dt className="text-neutral-500">IP</dt>
+        <dd className="text-neutral-900">{receipt.ip || "indisponível"}</dd>
+        <dt className="text-neutral-500">Localização</dt>
+        <dd className="text-neutral-900">
+          {link ? (
+            <a href={link} target="_blank" rel="noreferrer" className="text-brand-600 hover:underline">
+              Ver no mapa
+            </a>
+          ) : (
+            "não autorizada"
+          )}
+        </dd>
       </dl>
       <div className="mt-3 flex flex-wrap gap-2">
         <Button variant="secondary" onClick={onCopy}>Copiar texto</Button>
