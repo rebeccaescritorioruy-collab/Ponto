@@ -25,6 +25,7 @@ export default function FuncionariosTab() {
   const [editingCpf, setEditingCpf] = useState(null)
   const [resetPwCpf, setResetPwCpf] = useState(null)
   const [resetPwValue, setResetPwValue] = useState("")
+  const [deleteCpf, setDeleteCpf] = useState(null)
   const [error, setError] = useState(null)
   const [notice, setNotice] = useState(null)
 
@@ -80,6 +81,21 @@ export default function FuncionariosTab() {
     setResetPwCpf(null)
     setResetPwValue("")
     flashNotice("Senha redefinida.")
+  }
+
+  async function submitDelete() {
+    const { error } = await supabase.from("employees").delete().eq("cpf", deleteCpf)
+    if (error) {
+      setError(
+        error.code === "23503"
+          ? "Não é possível excluir: já existem marcações de ponto (ou faltas/ajustes) registradas para esse CPF, e a lei exige guardar esse histórico. Use \"Desativar\" para impedir o acesso mantendo o histórico."
+          : error.message
+      )
+      return
+    }
+    setDeleteCpf(null)
+    flashNotice("Funcionário excluído.")
+    reload()
   }
 
   const disponiveis = jornadasDisponiveis(empForm.vinculo, empForm.comprovanteAlternancia)
@@ -251,6 +267,7 @@ export default function FuncionariosTab() {
                         <Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => startEdit(e)}>Editar</Button>
                         <Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => toggleActive(e)}>{e.ativo ? "Desativar" : "Reativar"}</Button>
                         <Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => setResetPwCpf(e.cpf)}>Redefinir senha</Button>
+                        <Button variant="ghost" className="px-2 py-1 text-xs text-red-600 hover:bg-red-50" onClick={() => setDeleteCpf(e.cpf)}>Excluir</Button>
                       </div>
                     </td>
                   </tr>
@@ -265,6 +282,20 @@ export default function FuncionariosTab() {
             <TextField label="Nova senha" type="password" value={resetPwValue} onChange={(e) => setResetPwValue(e.target.value)} />
             <Button onClick={submitResetPassword}>Confirmar</Button>
             <Button variant="secondary" onClick={() => { setResetPwCpf(null); setResetPwValue("") }}>Cancelar</Button>
+          </div>
+        )}
+
+        {deleteCpf && (
+          <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-4">
+            <p className="text-sm text-red-800">
+              Tem certeza que quer excluir <strong>{employees.find((e) => e.cpf === deleteCpf)?.nome}</strong> permanentemente?
+              Essa ação não pode ser desfeita. Se essa pessoa já bateu ponto alguma vez, prefira "Desativar" — a exclusão só
+              funciona para cadastros sem nenhuma marcação, falta ou ajuste vinculado.
+            </p>
+            <div className="mt-3 flex gap-2">
+              <Button variant="danger" onClick={submitDelete}>Excluir permanentemente</Button>
+              <Button variant="secondary" onClick={() => setDeleteCpf(null)}>Cancelar</Button>
+            </div>
           </div>
         )}
       </Card>
