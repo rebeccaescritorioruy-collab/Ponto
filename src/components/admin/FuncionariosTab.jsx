@@ -30,6 +30,9 @@ export default function FuncionariosTab() {
   const [deleteCpf, setDeleteCpf] = useState(null)
   const [error, setError] = useState(null)
   const [notice, setNotice] = useState(null)
+  const [busca, setBusca] = useState("")
+  const [pagina, setPagina] = useState(1)
+  const PAGE_SIZE = 10
 
   function flashNotice(msg) {
     setNotice(msg)
@@ -107,6 +110,18 @@ export default function FuncionariosTab() {
   const minimoLegalIntervalo = intervaloPrevistoMinutos(empForm.horasDiarias)
   const intervaloAbaixoDoMinimo = empForm.intervaloMinutos !== ""
     && Number(empForm.intervaloMinutos) < minimoLegalIntervalo
+
+  const buscaNormalizada = busca.trim().toLowerCase()
+  const buscaDigits = busca.replace(/\D/g, "")
+  const employeesFiltrados = buscaNormalizada === "" ? employees : employees.filter((e) => {
+    const nomeMatch = (e.nome || "").toLowerCase().includes(buscaNormalizada)
+    const cargoMatch = (e.cargo || "").toLowerCase().includes(buscaNormalizada)
+    const cpfMatch = buscaDigits !== "" && (e.cpf || "").includes(buscaDigits)
+    return nomeMatch || cargoMatch || cpfMatch
+  })
+  const totalPaginas = Math.max(1, Math.ceil(employeesFiltrados.length / PAGE_SIZE))
+  const paginaAtual = Math.min(pagina, totalPaginas)
+  const employeesPagina = employeesFiltrados.slice((paginaAtual - 1) * PAGE_SIZE, paginaAtual * PAGE_SIZE)
 
   return (
     <div className="space-y-6">
@@ -233,11 +248,19 @@ export default function FuncionariosTab() {
       </Card>
 
       <Card>
-        <h3 className="mb-4 text-base font-semibold text-neutral-900">Equipe cadastrada</h3>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <h3 className="text-base font-semibold text-neutral-900">Equipe cadastrada</h3>
+          <TextField
+            placeholder="Buscar por nome, CPF ou cargo…" className="w-full sm:w-72"
+            value={busca} onChange={(e) => { setBusca(e.target.value); setPagina(1) }}
+          />
+        </div>
         {loading ? (
           <p className="text-sm text-neutral-500">Carregando…</p>
         ) : employees.length === 0 ? (
           <p className="text-sm text-neutral-500">Nenhum funcionário cadastrado.</p>
+        ) : employeesFiltrados.length === 0 ? (
+          <p className="text-sm text-neutral-500">Nenhum funcionário encontrado para "{busca}".</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
@@ -255,7 +278,7 @@ export default function FuncionariosTab() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-neutral-100">
-                {employees.map((e) => (
+                {employeesPagina.map((e) => (
                   <tr key={e.cpf}>
                     <td className="py-2 pr-4 text-neutral-900">{e.nome}</td>
                     <td className="py-2 pr-4 text-neutral-600">{formatCPF(e.cpf)}</td>
@@ -287,6 +310,24 @@ export default function FuncionariosTab() {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {employeesFiltrados.length > 0 && totalPaginas > 1 && (
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs text-neutral-500">
+              {employeesFiltrados.length} funcionário{employeesFiltrados.length === 1 ? "" : "s"}
+              {buscaNormalizada !== "" ? ` (filtrado${employeesFiltrados.length === 1 ? "" : "s"})` : ""}
+              {" — página "}{paginaAtual} de {totalPaginas}
+            </p>
+            <div className="flex gap-2">
+              <Button variant="secondary" className="px-3 py-1 text-xs" disabled={paginaAtual <= 1} onClick={() => setPagina(paginaAtual - 1)}>
+                Anterior
+              </Button>
+              <Button variant="secondary" className="px-3 py-1 text-xs" disabled={paginaAtual >= totalPaginas} onClick={() => setPagina(paginaAtual + 1)}>
+                Próxima
+              </Button>
+            </div>
           </div>
         )}
 
