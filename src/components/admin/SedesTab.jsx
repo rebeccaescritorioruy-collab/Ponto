@@ -1,14 +1,15 @@
 import { useState } from "react"
 import { supabase } from "../../lib/supabase"
 import { useSedes } from "../../hooks/useSedes"
-import { fetchLocation, mapsLink } from "../../lib/geo"
+import { fetchLocation, mapsLink, geocodeAddress } from "../../lib/geo"
 import Card from "../ui/Card"
 import TextField from "../ui/TextField"
 import Button from "../ui/Button"
 import Alert from "../ui/Alert"
+import Toast from "../ui/Toast"
 
 function empty() {
-  return { cidade: "", latitude: null, longitude: null, raio_metros: 150, bloqueio_localizacao_ativo: false }
+  return { cidade: "", endereco: "", latitude: null, longitude: null, raio_metros: 150, bloqueio_localizacao_ativo: false }
 }
 
 export default function SedesTab() {
@@ -16,7 +17,9 @@ export default function SedesTab() {
   const [drafts, setDrafts] = useState({})
   const [syncedSedes, setSyncedSedes] = useState(sedes)
   const [novaCidade, setNovaCidade] = useState("")
+  const [novoEndereco, setNovoEndereco] = useState("")
   const [localizando, setLocalizando] = useState(null)
+  const [buscando, setBuscando] = useState(null)
   const [notice, setNotice] = useState(null)
   const [error, setError] = useState(null)
 
@@ -48,12 +51,36 @@ export default function SedesTab() {
     })
   }
 
+  async function buscarPeloEndereco(id) {
+    const endereco = drafts[id]?.endereco || ""
+    setBuscando(id)
+    const resultado = await geocodeAddress(endereco)
+    setBuscando(null)
+    if (resultado.latitude === null) {
+      setError(resultado.geocodeError)
+      return
+    }
+    setError(null)
+    setDrafts({
+      ...drafts,
+      [id]: { ...drafts[id], latitude: resultado.latitude, longitude: resultado.longitude },
+    })
+    flashNotice(`Localização encontrada: ${resultado.displayName}. Confira no mapa antes de salvar.`)
+  }
+
   async function salvarSede(id) {
-    const { error } = await supabase.from("sedes").update(drafts[id]).eq("id", id)
+    // "id" é coluna identity (gerada automaticamente) — o Postgres rejeita qualquer update
+    // que a inclua, mesmo mantendo o mesmo valor.
+    const semId = { ...drafts[id] }
+    delete semId.id
+    const { error } = await supabase.from("sedes").update(semId).eq("id", id)
     if (error) return setError(error.message)
     setError(null)
-    setNotice(`Sede "${drafts[id].cidade}" salva.`)
-    setTimeout(() => setNotice(null), 2500)
+    flashNotice(
+      semId.endereco
+        ? `Endereço de "${drafts[id].cidade}" salvo: ${semId.endereco}`
+        : `Sede "${drafts[id].cidade}" salva.`
+    )
     reload()
   }
 
@@ -80,10 +107,13 @@ export default function SedesTab() {
   async function adicionarCidade(e) {
     e.preventDefault()
     if (!novaCidade.trim()) return
-    const { error } = await supabase.from("sedes").insert({ ...empty(), cidade: novaCidade.trim() })
+    const { error } = await supabase.from("sedes").insert({
+      ...empty(), cidade: novaCidade.trim(), endereco: novoEndereco.trim(),
+    })
     if (error) return setError(error.message)
     setError(null)
     setNovaCidade("")
+    setNovoEndereco("")
     flashNotice(`Cidade "${novaCidade.trim()}" adicionada.`)
     reload()
   }
@@ -91,7 +121,7 @@ export default function SedesTab() {
   return (
     <div className="space-y-6">
       {error && <Alert tone="error">{error}</Alert>}
-      {notice && <Alert tone="success">{notice}</Alert>}
+      <Toast message={notice} />
 
       <Card>
         <h3 className="mb-1 text-base font-semibold text-neutral-900">Sedes / cidades</h3>
@@ -101,6 +131,10 @@ export default function SedesTab() {
         </p>
         <form className="flex flex-wrap items-end gap-3" onSubmit={adicionarCidade}>
           <TextField label="Nova cidade" placeholder="ex.: João Pessoa" value={novaCidade} onChange={(e) => setNovaCidade(e.target.value)} />
+          <TextField
+            label="Endereço (rua/prédio)" placeholder="ex.: Av. Epitácio Pessoa, 1000 — Ed. Torre Norte"
+            value={novoEndereco} onChange={(e) => setNovoEndereco(e.target.value)}
+          />
           <Button type="submit">Adicionar cidade</Button>
         </form>
       </Card>
@@ -124,18 +158,46 @@ export default function SedesTab() {
                 </button>
               </div>
 
-              <div className="flex flex-wrap items-end gap-3">
+              <TextField
+                label="Endereço (rua/prédio)" placeholder="ex.: Av. Epitácio Pessoa, 1000 — Ed. Torre Norte"
+                value={d.endereco || ""} onChange={(e) => updateField(s.id, "endereco", e.target.value)}
+              />
+
+              <div className="mt-4 flex flex-wrap items-end gap-3">
+                <Button
+                  type="button" variant="secondary" onClick={() => buscarPeloEndereco(s.id)}
+                  disabled={buscando === s.id || !(d.endereco || "").trim()}
+                >
+                  {buscando === s.id ? "Buscando…" : "Buscar localização pelo endereço"}
+                </Button>
                 <Button type="button" variant="secondary" onClick={() => usarLocalizacaoAtual(s.id)} disabled={localizando === s.id}>
                   {localizando === s.id ? "Obtendo localização…" : "Usar minha localização atual"}
                 </Button>
-                {temLocalizacao ? (
+                {temLocalizacao && (
                   <a href={mapsLink(d.latitude, d.longitude)} target="_blank" rel="noreferrer" className="text-sm text-brand-600 hover:underline">
-                    Ver localização definida no mapa
+                    Ver no mapa
                   </a>
-                ) : (
-                  <span className="text-sm text-neutral-500">Nenhuma localização definida ainda.</span>
                 )}
               </div>
+              <p className="mt-1 text-xs text-neutral-500">
+                "Buscar pelo endereço" funciona de qualquer lugar (bom pra quem não pode ir até lá). "Usar minha
+                localização atual" só funciona estando fisicamente no endereço. Depois de buscar, confira no mapa
+                se o ponto ficou certo — se não, ajuste a latitude/longitude manualmente abaixo.
+              </p>
+
+              <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <TextField
+                  label="Latitude" type="number" step="0.000001"
+                  value={d.latitude ?? ""}
+                  onChange={(e) => updateField(s.id, "latitude", e.target.value === "" ? null : Number(e.target.value))}
+                />
+                <TextField
+                  label="Longitude" type="number" step="0.000001"
+                  value={d.longitude ?? ""}
+                  onChange={(e) => updateField(s.id, "longitude", e.target.value === "" ? null : Number(e.target.value))}
+                />
+              </div>
+              {!temLocalizacao && <p className="mt-1 text-xs text-neutral-500">Nenhuma localização definida ainda.</p>}
 
               <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <TextField

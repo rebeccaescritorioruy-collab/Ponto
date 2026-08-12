@@ -50,6 +50,35 @@ export function fetchLocation() {
   })
 }
 
+/** Converte um endereço em texto pra coordenadas (geocoding), via Nominatim/OpenStreetMap —
+    serviço público gratuito, sem precisar de chave de API. Existe pra quem está configurando
+    a sede remotamente, sem poder ir fisicamente até lá pra usar o GPS do navegador. */
+export async function geocodeAddress(query) {
+  if (!query || !query.trim()) {
+    return { latitude: null, longitude: null, displayName: null, geocodeError: "Digite um endereço pra buscar." }
+  }
+  try {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 6000)
+    const params = new URLSearchParams({ format: "json", q: query, limit: "1" })
+    const res = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, { signal: controller.signal })
+    clearTimeout(timeout)
+    if (!res.ok) {
+      return { latitude: null, longitude: null, displayName: null, geocodeError: "Não foi possível buscar esse endereço agora — tente de novo." }
+    }
+    const data = await res.json()
+    if (!data.length) {
+      return {
+        latitude: null, longitude: null, displayName: null,
+        geocodeError: "Endereço não encontrado. Tente detalhar mais (rua, número, cidade, estado) ou defina a latitude/longitude manualmente.",
+      }
+    }
+    return { latitude: Number(data[0].lat), longitude: Number(data[0].lon), displayName: data[0].display_name, geocodeError: null }
+  } catch {
+    return { latitude: null, longitude: null, displayName: null, geocodeError: "Erro ao buscar o endereço. Tente de novo ou defina manualmente." }
+  }
+}
+
 /** Coleta IP e localização em paralelo. Sempre resolve, nunca rejeita. */
 export async function collectPunchOrigin() {
   const [ip, location] = await Promise.all([fetchIp(), fetchLocation()])
