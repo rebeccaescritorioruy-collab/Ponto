@@ -2,7 +2,7 @@ import { useEffect, useState } from "react"
 import { supabase } from "../../lib/supabase"
 import { useEmployees } from "../../hooks/useEmployees"
 import { todayKey, sha256, FALTA_MOTIVOS, PUNCH_TYPES, punchTypesForEmployee, formatDateTime } from "../../lib/calculo"
-import { mapsLink } from "../../lib/geo"
+import { mapsLink, formatAltitude } from "../../lib/geo"
 import Card from "../ui/Card"
 import Select from "../ui/Select"
 import TextField from "../ui/TextField"
@@ -205,6 +205,7 @@ export default function TratamentoTab() {
                           </a>
                         </>
                       )}
+                      {formatAltitude(p.altitude) && ` · ${formatAltitude(p.altitude)}`}
                     </p>
                   </div>
                   {editingPunchId === p.id ? (

@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { supabase } from "../../lib/supabase"
 import { useEmployees } from "../../hooks/useEmployees"
+import { useSedes } from "../../hooks/useSedes"
 import {
   sha256, formatCPF, VINCULOS, vinculoLabel, jornadasDisponiveis, getJornadaPreset, formatRegimeResumo,
   intervaloPrevistoMinutos, formatIntervaloPrevisto,
@@ -13,7 +14,7 @@ import Alert from "../ui/Alert"
 
 function emptyEmpForm() {
   return {
-    cpf: "", nome: "", matricula: "", cargo: "", ctps: "", lotacao: "", admissao: "", horario: "",
+    cpf: "", nome: "", matricula: "", cargo: "", ctps: "", lotacao: "", cidade: "", admissao: "", horario: "",
     vinculo: "clt", horasDiarias: "8", jornadaMensalHoras: "200", comprovanteAlternancia: false,
     entradaPrevista: "", saidaPrevista: "", intervaloMinutos: "", senha: "", ativo: true,
   }
@@ -21,6 +22,7 @@ function emptyEmpForm() {
 
 export default function FuncionariosTab() {
   const { employees, loading, reload, toRow } = useEmployees()
+  const { sedes } = useSedes()
   const [empForm, setEmpForm] = useState(emptyEmpForm())
   const [editingCpf, setEditingCpf] = useState(null)
   const [resetPwCpf, setResetPwCpf] = useState(null)
@@ -162,6 +164,15 @@ export default function FuncionariosTab() {
           <TextField label="Cargo / função" value={empForm.cargo} onChange={(e) => setEmpForm({ ...empForm, cargo: e.target.value })} />
           <TextField label="CTPS" placeholder="ex.: 00007033955/08474" value={empForm.ctps} onChange={(e) => setEmpForm({ ...empForm, ctps: e.target.value })} />
           <TextField label="Lotação / unidade" placeholder="ex.: 001 João Pessoa" value={empForm.lotacao} onChange={(e) => setEmpForm({ ...empForm, lotacao: e.target.value })} />
+          <div>
+            <Select label="Cidade (limitador de localização)" value={empForm.cidade} onChange={(e) => setEmpForm({ ...empForm, cidade: e.target.value })}>
+              <option value="">Selecione</option>
+              {sedes.map((s) => <option key={s.id} value={s.cidade}>{s.cidade}</option>)}
+            </Select>
+            {sedes.length === 0 && (
+              <p className="mt-1 text-xs text-neutral-500">Nenhuma cidade cadastrada ainda — crie na aba Sedes.</p>
+            )}
+          </div>
           <TextField label="Data de admissão" type="date" value={empForm.admissao} onChange={(e) => setEmpForm({ ...empForm, admissao: e.target.value })} />
           <TextField
             label="Horário contratual (descritivo)" placeholder="ex.: 08h–12h / 13h–18h"
@@ -236,6 +247,7 @@ export default function FuncionariosTab() {
                   <th className="py-2 pr-4 font-medium">CPF</th>
                   <th className="py-2 pr-4 font-medium">Vínculo</th>
                   <th className="py-2 pr-4 font-medium">Cargo</th>
+                  <th className="py-2 pr-4 font-medium">Cidade</th>
                   <th className="py-2 pr-4 font-medium">Jornada</th>
                   <th className="py-2 pr-4 font-medium">Intervalo</th>
                   <th className="py-2 pr-4 font-medium">Status</th>
@@ -249,6 +261,7 @@ export default function FuncionariosTab() {
                     <td className="py-2 pr-4 text-neutral-600">{formatCPF(e.cpf)}</td>
                     <td className="py-2 pr-4 text-neutral-600">{vinculoLabel(e.vinculo)}</td>
                     <td className="py-2 pr-4 text-neutral-600">{e.cargo}</td>
+                    <td className="py-2 pr-4 text-neutral-600">{e.cidade || "—"}</td>
                     <td className="py-2 pr-4 text-neutral-600">{formatRegimeResumo(e.horasDiarias, e.jornadaMensalHoras)}</td>
                     <td className="py-2 pr-4 text-neutral-600">
                       {formatIntervaloPrevisto(e)}

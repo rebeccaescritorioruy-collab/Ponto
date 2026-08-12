@@ -29,11 +29,21 @@ export function fetchLocation() {
           latitude: pos.coords.latitude,
           longitude: pos.coords.longitude,
           accuracyM: pos.coords.accuracy,
+          // Altitude do GPS: informativa apenas — o erro típico (±10-30m) é do tamanho de
+          // vários andares de prédio, então nunca deve ser usada pra bloquear ninguém, só
+          // pra registro/consulta manual do admin. Costuma vir em branco em ambientes
+          // internos (o celular perde sinal de satélite e cai pra localização por Wi-Fi).
+          altitude: pos.coords.altitude,
+          altitudeAccuracyM: pos.coords.altitudeAccuracy,
           locationError: null,
         })
       },
       (err) => {
-        resolve({ latitude: null, longitude: null, accuracyM: null, locationError: err.message || "Localização não autorizada" })
+        resolve({
+          latitude: null, longitude: null, accuracyM: null,
+          altitude: null, altitudeAccuracyM: null,
+          locationError: err.message || "Localização não autorizada",
+        })
       },
       { enableHighAccuracy: true, timeout: 6000, maximumAge: 0 }
     )
@@ -44,6 +54,12 @@ export function fetchLocation() {
 export async function collectPunchOrigin() {
   const [ip, location] = await Promise.all([fetchIp(), fetchLocation()])
   return { ip, ...location }
+}
+
+/** Altitude é só informativa (ver nota em fetchLocation) — nunca usar pra decisão, só exibição. */
+export function formatAltitude(altitude) {
+  if (altitude === null || altitude === undefined) return null
+  return `~${Math.round(altitude)}m de altitude`
 }
 
 export function mapsLink(latitude, longitude) {

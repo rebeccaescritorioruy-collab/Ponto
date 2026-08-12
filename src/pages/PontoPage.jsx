@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react"
 import { supabase } from "../lib/supabase"
 import { useSession } from "../hooks/useSession"
 import { useEmployers } from "../hooks/useEmployers"
+import { useSedes } from "../hooks/useSedes"
 import { todayKey, sha256, punchTypesForEmployee, empresaDoVinculo } from "../lib/calculo"
 import { buildComprovanteText, downloadComprovanteTexto, downloadComprovanteXLSX } from "../lib/export"
 import { collectPunchOrigin, distanceMeters } from "../lib/geo"
@@ -17,6 +18,7 @@ export default function PontoPage() {
     loginEmployee, changeOwnPassword,
   } = useSession()
   const { employers } = useEmployers()
+  const { sedes } = useSedes()
 
   const [loginCpf, setLoginCpf] = useState("")
   const [loginPassword, setLoginPassword] = useState("")
@@ -76,7 +78,7 @@ export default function PontoPage() {
       // Coleta IP/localização primeiro — a localização é sempre obrigatória pra bater o
       // ponto (independente de bloqueio por endereço específico estar configurado ou não),
       // então precisa confirmar antes de decidir se registra.
-      const { ip, latitude, longitude, accuracyM, locationError } = await collectPunchOrigin()
+      const { ip, latitude, longitude, accuracyM, altitude, altitudeAccuracyM, locationError } = await collectPunchOrigin()
 
       if (latitude === null || longitude === null) {
         setEmployeeError(
@@ -87,12 +89,15 @@ export default function PontoPage() {
         return
       }
 
-      const exigeLocalizacaoEspecifica = empresa?.bloqueio_localizacao_ativo
-        && empresa?.latitude !== null && empresa?.latitude !== undefined
-        && empresa?.longitude !== null && empresa?.longitude !== undefined
+      // O limitador de localização é por cidade (sede), não por vínculo — um CLT e um
+      // estagiário na mesma cidade caem no mesmo limite.
+      const sede = sedes.find((s) => s.cidade === loggedInEmployee.cidade)
+      const exigeLocalizacaoEspecifica = sede?.bloqueio_localizacao_ativo
+        && sede?.latitude !== null && sede?.latitude !== undefined
+        && sede?.longitude !== null && sede?.longitude !== undefined
       if (exigeLocalizacaoEspecifica) {
-        const dist = distanceMeters(latitude, longitude, empresa.latitude, empresa.longitude)
-        const raio = empresa.raio_metros || 150
+        const dist = distanceMeters(latitude, longitude, sede.latitude, sede.longitude)
+        const raio = sede.raio_metros || 150
         if (dist > raio) {
           setEmployeeError(
             `Você está a ${Math.round(dist)}m do local exigido pra bater o ponto (máximo permitido: ${raio}m). `
@@ -114,6 +119,7 @@ export default function PontoPage() {
         .insert({
           cpf: loggedInEmployee.cpf, nsr: nextNsr, type: nextType, time, hash,
           ip, latitude, longitude, accuracy_m: accuracyM, location_error: locationError,
+          altitude, altitude_accuracy_m: altitudeAccuracyM,
         })
         .select()
         .single()

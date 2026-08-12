@@ -1,10 +1,11 @@
 import Card from "../ui/Card"
 import Button from "../ui/Button"
 import { formatDateTime } from "../../lib/calculo"
-import { mapsLink } from "../../lib/geo"
+import { mapsLink, formatAltitude } from "../../lib/geo"
 
 export default function ComprovanteCard({ receipt, status, onCopy, onDownload, onDownloadXLSX }) {
   const link = mapsLink(receipt.latitude, receipt.longitude)
+  const altitude = formatAltitude(receipt.altitude)
   return (
     <Card className="border-emerald-200 bg-emerald-50/50">
       <h3 className="mb-2 text-sm font-semibold text-emerald-800">Ponto registrado</h3>
@@ -26,6 +27,7 @@ export default function ComprovanteCard({ receipt, status, onCopy, onDownload, o
           ) : (
             "não autorizada"
           )}
+          {altitude && <span className="ml-1 text-xs text-neutral-400">· {altitude}</span>}
         </dd>
       </dl>
       <div className="mt-3 flex flex-wrap gap-2">

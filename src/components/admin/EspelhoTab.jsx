@@ -8,7 +8,7 @@ import {
   limiteSemanalEstagioMinutos,
 } from "../../lib/calculo"
 import { exportEspelhoCSV, exportEspelhoXLSX } from "../../lib/export"
-import { mapsLink } from "../../lib/geo"
+import { mapsLink, formatAltitude } from "../../lib/geo"
 import Card from "../ui/Card"
 import Select from "../ui/Select"
 import TextField from "../ui/TextField"
@@ -279,6 +279,7 @@ export default function EspelhoTab() {
                           <span className="inline-flex flex-wrap items-center gap-x-1">
                             {s.merged.map((p, i) => {
                               const link = mapsLink(p.latitude, p.longitude)
+                              const altitude = formatAltitude(p.altitude)
                               return (
                                 <span key={p.id ?? i} className="inline-flex items-center">
                                   {i > 0 && <span className="mr-1 text-neutral-300">·</span>}
@@ -286,7 +287,7 @@ export default function EspelhoTab() {
                                   {link && (
                                     <a
                                       href={link} target="_blank" rel="noreferrer"
-                                      title="Ver localização dessa marcação"
+                                      title={altitude ? `Ver localização dessa marcação (${altitude})` : "Ver localização dessa marcação"}
                                       className="ml-0.5 text-brand-600 hover:underline"
                                     >
                                       📍
