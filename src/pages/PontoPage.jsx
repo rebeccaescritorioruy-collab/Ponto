@@ -23,6 +23,7 @@ export default function PontoPage() {
   const [loginCpf, setLoginCpf] = useState("")
   const [loginPassword, setLoginPassword] = useState("")
   const [punchesState, setPunchesState] = useState({ cpf: null, items: [] })
+  const [treatmentsHojeState, setTreatmentsHojeState] = useState({ cpf: null, items: [] })
   const [lastReceipt, setLastReceipt] = useState(null)
   const [comprovanteStatus, setComprovanteStatus] = useState(null)
   const [stamping, setStamping] = useState(false)
@@ -30,6 +31,7 @@ export default function PontoPage() {
   const [notice, setNotice] = useState(null)
 
   const punches = loggedInEmployee && punchesState.cpf === loggedInEmployee.cpf ? punchesState.items : []
+  const treatmentsHoje = loggedInEmployee && treatmentsHojeState.cpf === loggedInEmployee.cpf ? treatmentsHojeState.items : []
 
   const loadPunches = useCallback((cpf) => {
     if (!cpf) return
@@ -43,11 +45,29 @@ export default function PontoPage() {
       })
   }, [])
 
-  // Busca as marcações de hoje sempre que o funcionário logado muda — efeito de
+  // Busca um eventual tratamento de carga reduzida lançado pelo admin pra hoje — sem isso,
+  // o botão de bater ponto não saberia que hoje o funcionário não tem intervalo previsto, e
+  // rotularia a 2ª marcação do dia como "Início do intervalo" por engano.
+  const loadTreatmentsHoje = useCallback((cpf) => {
+    if (!cpf) return
+    supabase
+      .from("treatments").select("*").eq("cpf", cpf).eq("date", todayKey())
+      .then(({ data, error }) => {
+        if (!error) {
+          setTreatmentsHojeState({
+            cpf,
+            items: (data || []).map((row) => ({ kind: row.kind, percentualCarga: row.percentual_carga })),
+          })
+        }
+      })
+  }, [])
+
+  // Busca as marcações/tratamentos de hoje sempre que o funcionário logado muda — efeito de
   // sincronização com o Supabase (fonte externa), não um espelhamento de estado local.
   useEffect(() => {
     loadPunches(loggedInEmployee?.cpf)
-  }, [loggedInEmployee, loadPunches])
+    loadTreatmentsHoje(loggedInEmployee?.cpf)
+  }, [loggedInEmployee, loadPunches, loadTreatmentsHoje])
 
   // Zera o comprovante/senha/troca-de-senha quando o funcionário logado muda. Ajuste de
   // estado durante a renderização (guardado por comparação), em vez de efeito, seguindo o
@@ -110,7 +130,7 @@ export default function PontoPage() {
 
       const { data: counter } = await supabase.from("nsr_counter").select("*").single()
       const nextNsr = (counter?.valor || 0) + 1
-      const tipos = punchTypesForEmployee(loggedInEmployee)
+      const tipos = punchTypesForEmployee(loggedInEmployee, treatmentsHoje)
       const nextType = tipos[punches.length % tipos.length]
       const time = new Date().toISOString()
       const hash = await sha256(`${nextNsr}|${loggedInEmployee.cpf}|${nextType}|${time}`)
@@ -193,6 +213,7 @@ export default function PontoPage() {
       <ClockPunchCard
         employee={loggedInEmployee}
         punches={punches}
+        treatmentsHoje={treatmentsHoje}
         onPunch={handlePunch}
         stamping={stamping}
         onToggleChangePassword={() => setShowChangePassword((v) => !v)}

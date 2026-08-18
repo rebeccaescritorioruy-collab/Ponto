@@ -32,7 +32,9 @@ export default function TratamentoTab() {
   const existing = existingState.key === entryKey ? existingState.items : []
   const dayPunches = punchesState.key === entryKey ? punchesState.items : []
   const selectedEmployee = employees.find((e) => e.cpf === cpf)
-  const tiposDisponiveis = punchTypesForEmployee(selectedEmployee)
+  // punchTypesForEmployee espera camelCase — "existing" vem direto do banco em snake_case.
+  const tratamentosDoDia = existing.map((t) => ({ kind: t.kind, percentualCarga: t.percentual_carga }))
+  const tiposDisponiveis = punchTypesForEmployee(selectedEmployee, tratamentosDoDia)
   // Se o funcionário selecionado mudar pra um regime sem intervalo, "Início/Fim do intervalo"
   // deixam de ser opções válidas — cai pro primeiro tipo disponível em vez de manter escondido.
   const effectiveAddType = tiposDisponiveis.includes(addType) ? addType : tiposDisponiveis[0]

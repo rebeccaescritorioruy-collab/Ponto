@@ -10,14 +10,14 @@ const PUNCH_COLORS = {
   "Saída": "bg-rose-500",
 }
 
-export default function ClockPunchCard({ employee, punches, onPunch, stamping, onToggleChangePassword }) {
+export default function ClockPunchCard({ employee, punches, treatmentsHoje, onPunch, stamping, onToggleChangePassword }) {
   const [now, setNow] = useState(new Date())
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000)
     return () => clearInterval(t)
   }, [])
 
-  const tipos = punchTypesForEmployee(employee)
+  const tipos = punchTypesForEmployee(employee, treatmentsHoje)
   const nextType = tipos[punches.length % tipos.length]
 
   return (
