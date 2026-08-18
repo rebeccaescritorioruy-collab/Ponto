@@ -15,7 +15,7 @@ export default function TratamentoTab() {
   const [date, setDate] = useState(todayKey())
   const [lancamentoTipo, setLancamentoTipo] = useState("falta")
   const [motivoFalta, setMotivoFalta] = useState(FALTA_MOTIVOS[0])
-  const [percentualCarga, setPercentualCarga] = useState("50")
+  const [percentualCarga, setPercentualCarga] = useState("")
   const [motivo, setMotivo] = useState("")
   // Guarda os itens junto da chave (cpf+data) que os originou — permite derivar a lista
   // atual sem precisar de um setState síncrono dentro do efeito de busca.
@@ -65,8 +65,13 @@ export default function TratamentoTab() {
       if (!motivo.trim()) return setError("Informe o motivo da falta.")
       payload = { cpf, date, kind: "falta", motivo_categoria: motivoFalta, motivo: motivo.trim() }
     } else {
-      const pct = Number(percentualCarga)
-      if (!pct || pct <= 0 || pct >= 100) return setError("Informe um percentual de carga entre 1 e 99.")
+      // Percentual é opcional — se não informado, buildDaySummary() já assume 50% (metade da
+      // jornada), o padrão mais comum pra redução por prova. Só valida quando preenchido.
+      let pct = null
+      if (percentualCarga.trim() !== "") {
+        pct = Number(percentualCarga)
+        if (!pct || pct <= 0 || pct >= 100) return setError("Se for informar o percentual, use um valor entre 1 e 99 (ou deixe em branco para o padrão de 50%).")
+      }
       payload = { cpf, date, kind: "carga_reduzida", percentual_carga: pct, motivo: motivo.trim() }
     }
 
@@ -260,8 +265,8 @@ export default function TratamentoTab() {
               </Select>
             ) : (
               <TextField
-                label="Percentual da jornada exigido nesse dia" type="number" min="1" max="99" step="5"
-                placeholder="ex.: 50 para metade da carga"
+                label="Percentual da jornada exigido nesse dia (opcional)" type="number" min="1" max="99" step="5"
+                placeholder="Em branco = 50% (padrão pra prova)"
                 value={percentualCarga} onChange={(e) => setPercentualCarga(e.target.value)}
               />
             )}
@@ -287,7 +292,7 @@ export default function TratamentoTab() {
                 <div>
                   <p className="text-neutral-900">
                     {t.kind === "falta" && `Falta: ${t.motivo_categoria}`}
-                    {t.kind === "carga_reduzida" && `Carga reduzida: ${t.percentual_carga}% da jornada`}
+                    {t.kind === "carga_reduzida" && `Carga reduzida: ${t.percentual_carga || 50}% da jornada`}
                     {t.kind === "inclusao" && `Inclusão (legado): ${t.tipo_marcacao} às ${formatDateTime(t.horario)}`}
                   </p>
                   {t.motivo && <p className="text-xs text-neutral-500">{t.motivo}</p>}
