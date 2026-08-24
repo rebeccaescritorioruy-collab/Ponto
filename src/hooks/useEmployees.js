@@ -19,6 +19,7 @@ function mapRow(row) {
     saidaPrevista: row.saida_prevista,
     intervaloMinutos: row.intervalo_minutos,
     comprovanteAlternancia: row.comprovante_alternancia || false,
+    homeOffice: row.home_office || false,
     ativo: row.ativo,
     passwordHash: row.password_hash,
   }
@@ -48,6 +49,7 @@ function toRow(emp) {
     saida_prevista: emptyToNull(emp.saidaPrevista),
     intervalo_minutos: emptyToNull(emp.intervaloMinutos),
     comprovante_alternancia: Boolean(emp.comprovanteAlternancia),
+    home_office: Boolean(emp.homeOffice),
     ativo: emp.ativo,
     password_hash: emp.passwordHash ?? null,
   }

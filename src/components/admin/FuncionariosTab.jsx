@@ -15,7 +15,7 @@ import Alert from "../ui/Alert"
 function emptyEmpForm() {
   return {
     cpf: "", nome: "", matricula: "", cargo: "", ctps: "", lotacao: "", cidade: "", admissao: "", horario: "",
-    vinculo: "clt", horasDiarias: "8", jornadaMensalHoras: "200", comprovanteAlternancia: false,
+    vinculo: "clt", horasDiarias: "8", jornadaMensalHoras: "200", comprovanteAlternancia: false, homeOffice: false,
     entradaPrevista: "", saidaPrevista: "", intervaloMinutos: "", senha: "", ativo: true,
   }
 }
@@ -180,14 +180,26 @@ export default function FuncionariosTab() {
           <TextField label="CTPS" placeholder="ex.: 00007033955/08474" value={empForm.ctps} onChange={(e) => setEmpForm({ ...empForm, ctps: e.target.value })} />
           <TextField label="Lotação / unidade" placeholder="ex.: 001 João Pessoa" value={empForm.lotacao} onChange={(e) => setEmpForm({ ...empForm, lotacao: e.target.value })} />
           <div>
-            <Select label="Cidade (limitador de localização)" value={empForm.cidade} onChange={(e) => setEmpForm({ ...empForm, cidade: e.target.value })}>
+            <Select
+              label="Cidade (limitador de localização)" value={empForm.cidade} disabled={empForm.homeOffice}
+              onChange={(e) => setEmpForm({ ...empForm, cidade: e.target.value })}
+            >
               <option value="">Selecione</option>
               {sedes.map((s) => <option key={s.id} value={s.cidade}>{s.cidade}</option>)}
             </Select>
-            {sedes.length === 0 && (
+            {sedes.length === 0 && !empForm.homeOffice && (
               <p className="mt-1 text-xs text-neutral-500">Nenhuma cidade cadastrada ainda — crie na aba Sedes.</p>
             )}
           </div>
+
+          <label className="flex items-center gap-2 text-sm text-neutral-700 sm:col-span-2">
+            <input
+              type="checkbox"
+              checked={empForm.homeOffice}
+              onChange={(e) => setEmpForm({ ...empForm, homeOffice: e.target.checked })}
+            />
+            Home office — pode bater o ponto de qualquer localização, ignorando o limitador de cidade/sede
+          </label>
           <TextField label="Data de admissão" type="date" value={empForm.admissao} onChange={(e) => setEmpForm({ ...empForm, admissao: e.target.value })} />
           <TextField
             label="Horário contratual (descritivo)" placeholder="ex.: 08h–12h / 13h–18h"
@@ -284,7 +296,9 @@ export default function FuncionariosTab() {
                     <td className="py-2 pr-4 text-neutral-600">{formatCPF(e.cpf)}</td>
                     <td className="py-2 pr-4 text-neutral-600">{vinculoLabel(e.vinculo)}</td>
                     <td className="py-2 pr-4 text-neutral-600">{e.cargo}</td>
-                    <td className="py-2 pr-4 text-neutral-600">{e.cidade || "—"}</td>
+                    <td className="py-2 pr-4 text-neutral-600">
+                      {e.homeOffice ? <span className="text-brand-700">🏠 Home office</span> : (e.cidade || "—")}
+                    </td>
                     <td className="py-2 pr-4 text-neutral-600">{formatRegimeResumo(e.horasDiarias, e.jornadaMensalHoras)}</td>
                     <td className="py-2 pr-4 text-neutral-600">
                       {formatIntervaloPrevisto(e)}
