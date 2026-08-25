@@ -111,10 +111,12 @@ export default function PontoPage() {
 
       // O limitador de localização é por cidade (sede), não por vínculo — um CLT e um
       // estagiário na mesma cidade caem no mesmo limite. Home office é a exceção: aquele
-      // funcionário específico pode bater o ponto de qualquer lugar (IP/localização
-      // continuam sendo registrados normalmente, só não há checagem de raio).
+      // funcionário específico (ou, pontualmente, um dia marcado como home office em Faltas
+      // e ajustes) pode bater o ponto de qualquer lugar — IP/localização continuam sendo
+      // registrados normalmente, só não há checagem de raio.
+      const homeOfficeHoje = loggedInEmployee.homeOffice || treatmentsHoje.some((t) => t.kind === "home_office")
       const sede = sedes.find((s) => s.cidade === loggedInEmployee.cidade)
-      const exigeLocalizacaoEspecifica = !loggedInEmployee.homeOffice
+      const exigeLocalizacaoEspecifica = !homeOfficeHoje
         && sede?.bloqueio_localizacao_ativo
         && sede?.latitude !== null && sede?.latitude !== undefined
         && sede?.longitude !== null && sede?.longitude !== undefined

@@ -136,6 +136,11 @@ export function computeEspelhoRows(summaries) {
       }
     }
 
+    if (s.homeOfficeAplicado) {
+      const nota = `🏠 Home office${s.homeOfficeMotivo ? ": " + s.homeOfficeMotivo : ""}`
+      observacao = observacao ? `${observacao}; ${nota}` : nota
+    }
+
     return {
       dayKey, dataFmt, diaSemana, entrada, saidaIntervalo, retornoIntervalo, saida,
       horasTrabalhadas, horasPositivas, horasNegativas, observacao,
@@ -269,6 +274,9 @@ export function exportEspelhoCSV(params) {
       let totalLabel = s.intervaloComputadoNaJornada ? "Total do dia (intervalo computado na jornada — estágio)" : "Total do dia"
       if (s.toleranciaAplicada) totalLabel += " — dentro da tolerância diária de 10min (art. 58 §1º CLT)"
       rows.push([day, "", "", totalLabel, minutesToHHMM(s.balance)])
+    }
+    if (s.homeOfficeAplicado) {
+      rows.push([day, "", "🏠 Home office", s.homeOfficeMotivo || "", ""])
     }
   })
   rows.push([])

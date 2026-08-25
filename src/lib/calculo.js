@@ -256,6 +256,12 @@ export function buildDaySummary(dayKey, punches, treatments, employee) {
   const cicloTamanhoDia = cicloTamanhoParaDia(employee, treatments)
   const incluirIntervalo = intervaloContaComoJornada(employee?.vinculo, horasDiarias)
 
+  // Marcação de "home office" naquele dia — não muda cálculo nenhum, só fica registrada
+  // pra aparecer no espelho e na planilha (e libera o limitador de localização nesse dia).
+  const homeOfficeTreatment = treatments.find((t) => t.kind === "home_office")
+  const homeOfficeAplicado = Boolean(homeOfficeTreatment)
+  const homeOfficeMotivo = homeOfficeTreatment?.motivo
+
   const falta = treatments.find((t) => t.kind === "falta")
   if (falta) {
     // Abonado zera o saldo do dia (não penaliza), mas mostra na tela o que realmente foi
@@ -276,6 +282,7 @@ export function buildDaySummary(dayKey, punches, treatments, employee) {
       merged,
       semRegistro: false,
       toleranciaAplicada: false,
+      homeOfficeAplicado, homeOfficeMotivo,
     }
   }
 
@@ -293,6 +300,7 @@ export function buildDaySummary(dayKey, punches, treatments, employee) {
     return {
       minutes: 0, minutesCreditadas: 0, expectedMinutes: 0, balance: 0, status: "sem_registro",
       merged: [], semRegistro: true, toleranciaAplicada: false,
+      homeOfficeAplicado, homeOfficeMotivo,
     }
   }
 
@@ -303,6 +311,7 @@ export function buildDaySummary(dayKey, punches, treatments, employee) {
     return {
       minutes: 0, minutesCreditadas: 0, expectedMinutes, balance: 0, status: "incompleto",
       merged, semRegistro: false, toleranciaAplicada: false,
+      homeOfficeAplicado, homeOfficeMotivo,
     }
   }
 
@@ -327,6 +336,7 @@ export function buildDaySummary(dayKey, punches, treatments, employee) {
     // Hora extra além de 2h/dia só é permitida em casos excepcionais (art. 61 CLT) — sinaliza
     // pra revisão manual, não bloqueia o registro.
     horaExtraAcimaDoLimite: employee?.vinculo !== "estagiario" && balance > 120,
+    homeOfficeAplicado, homeOfficeMotivo,
   }
 }
 

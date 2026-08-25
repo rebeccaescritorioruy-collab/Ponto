@@ -306,6 +306,14 @@ export default function EspelhoTab() {
                         {semHoras ? "—" : minutesToHHMM(s.balance)}
                       </td>
                       <td className="py-2 pr-3">
+                        {s.homeOfficeAplicado && (
+                          <span
+                            title={s.homeOfficeMotivo || "Dia marcado como home office"}
+                            className="mr-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700"
+                          >
+                            🏠 Home office
+                          </span>
+                        )}
                         {s.status === "abonado" && (
                           <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">Abonado</span>
                         )}
