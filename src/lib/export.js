@@ -91,6 +91,20 @@ export function computeEspelhoRows(summaries) {
       horasPositivas = "0:00"
       horasNegativas = "0:00"
       observacao = `Abonado: ${s.motivo || ""}`
+    } else if (s.status === "falta_injustificada") {
+      // Falta não justificada desconta o dia inteiro do saldo — mostra o que foi realmente
+      // batido (se houve algo) mas o negativo reflete a meta cheia não cumprida.
+      s.merged.forEach((p) => {
+        const hhmm = `${String(new Date(p.time).getHours()).padStart(2, "0")}:${String(new Date(p.time).getMinutes()).padStart(2, "0")}`
+        if (p.type === "Entrada" && !entrada) entrada = hhmm
+        if (p.type === "Início do intervalo" && !saidaIntervalo) saidaIntervalo = hhmm
+        if (p.type === "Fim do intervalo" && !retornoIntervalo) retornoIntervalo = hhmm
+        if (p.type === "Saída" && !saida) saida = hhmm
+      })
+      horasTrabalhadas = minutesToClock(s.minutes)
+      horasPositivas = minutesToClock(s.balance > 0 ? s.balance : 0)
+      horasNegativas = minutesToClock(s.balance < 0 ? -s.balance : 0)
+      observacao = s.motivo || "Falta não justificada"
     } else if (s.status === "sem_registro") {
       observacao = isWeekend(dayKey)
         ? "Fim de semana"
@@ -258,6 +272,14 @@ export function exportEspelhoCSV(params) {
         })
       }
       rows.push([day, "", "", `Dia abonado: ${s.motivo || ""} (trabalhado: ${minutesToHHMM(s.minutes)})`, "0h00"])
+    } else if (s.status === "falta_injustificada") {
+      if (s.merged.length > 0) {
+        s.merged.forEach((p) => {
+          const hora = new Date(p.time).toLocaleTimeString("pt-BR", { hour12: false })
+          rows.push([day, hora, p.type, "Falta não justificada — marcação real do dia", ""])
+        })
+      }
+      rows.push([day, "", "", s.motivo || "Falta não justificada", minutesToHHMM(s.balance)])
     } else if (s.status === "sem_registro") {
       rows.push([day, "", isWeekend(day) ? "Fim de semana" : "Sem nenhum registro", "", "0h00"])
     } else if (s.status === "incompleto") {

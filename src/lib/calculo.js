@@ -51,7 +51,14 @@ export function formatCNPJ(v) {
 }
 
 export const PUNCH_TYPES = ["Entrada", "Início do intervalo", "Fim do intervalo", "Saída"]
-export const FALTA_MOTIVOS = ["Atestado médico", "Falta abonada", "Banco de horas / folga compensatória", "Férias", "Outro"]
+// Todas essas categorias são faltas JUSTIFICADAS (creditam o dia inteiro, não descontam nada),
+// exceto "Falta não justificada", que é tratada de forma oposta em buildDaySummary: desconta
+// o dia inteiro do saldo, já que não há amparo legal para abonar.
+export const FALTA_MOTIVOS = [
+  "Atestado médico", "Falta abonada", "Banco de horas / folga compensatória", "Férias", "Outro",
+  "Falta não justificada",
+]
+export const FALTA_NAO_JUSTIFICADA = "Falta não justificada"
 
 // Tolerância de ponto adotada pelo escritório: até 10 minutos de variação por marcação
 // (entrada, intervalo ou saída) não é descontado nem contado como extra — acima disso, conta
@@ -340,20 +347,22 @@ export function buildDaySummary(dayKey, punches, treatments, employee) {
 
   const falta = treatments.find((t) => t.kind === "falta")
   if (falta) {
-    // Abonado zera o saldo do dia (não penaliza), mas mostra na tela o que realmente foi
-    // batido — não esconde atrás da meta cheia. Se o funcionário bateu ponto parcialmente
-    // (ex.: saiu mais cedo por atestado), o "trabalhado" reflete isso; o saldo continua 0.
+    // Mostra na tela o que realmente foi batido — não esconde atrás da meta cheia. Se o
+    // funcionário bateu ponto parcialmente (ex.: saiu mais cedo por atestado), o "trabalhado"
+    // reflete isso.
     const minutesReais = merged.length > 0 && merged.length % cicloTamanhoDia === 0
       ? calcWorkedMinutes(merged, incluirIntervalo, cicloTamanhoDia)
       : 0
+    const injustificada = falta.motivoCategoria === FALTA_NAO_JUSTIFICADA
     return {
       minutes: minutesReais,
-      // No total do período, um dia abonado conta a carga cheia (é esse o efeito do abono —
-      // credita o dia inteiro), mesmo mostrando só o que foi realmente batido no dia a dia.
-      minutesCreditadas: baseExpectedMinutes,
+      // Falta justificada (abonada, atestado etc.) credita a carga cheia no total do período —
+      // é esse o efeito do abono. Falta NÃO justificada faz o oposto: desconta o dia inteiro,
+      // já que não há amparo legal pra abonar.
+      minutesCreditadas: injustificada ? minutesReais : baseExpectedMinutes,
       expectedMinutes: baseExpectedMinutes,
-      balance: 0,
-      status: "abonado",
+      balance: injustificada ? minutesReais - baseExpectedMinutes : 0,
+      status: injustificada ? "falta_injustificada" : "abonado",
       motivo: falta.motivoCategoria + (falta.motivo ? ` — ${falta.motivo}` : ""),
       merged,
       semRegistro: false,

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { supabase } from "../../lib/supabase"
 import { useEmployees } from "../../hooks/useEmployees"
-import { todayKey, sha256, FALTA_MOTIVOS, PUNCH_TYPES, punchTypesForEmployee, formatDateTime } from "../../lib/calculo"
+import { todayKey, sha256, FALTA_MOTIVOS, FALTA_NAO_JUSTIFICADA, PUNCH_TYPES, punchTypesForEmployee, formatDateTime } from "../../lib/calculo"
 import { mapsLink, formatAltitude } from "../../lib/geo"
 import Card from "../ui/Card"
 import Select from "../ui/Select"
@@ -64,8 +64,10 @@ export default function TratamentoTab() {
 
     let payload
     if (lancamentoTipo === "falta") {
-      if (!motivo.trim()) return setError("Informe o motivo da falta.")
-      payload = { cpf, date, kind: "falta", motivo_categoria: motivoFalta, motivo: motivo.trim() }
+      // Falta não justificada, por definição, não tem motivo pra registrar — só nas outras
+      // categorias (que são todas justificativas) o campo é obrigatório.
+      if (motivoFalta !== FALTA_NAO_JUSTIFICADA && !motivo.trim()) return setError("Informe o motivo da falta.")
+      payload = { cpf, date, kind: "falta", motivo_categoria: motivoFalta, motivo: motivo.trim() || null }
     } else if (lancamentoTipo === "carga_reduzida") {
       // Percentual é opcional — se não informado, buildDaySummary() já assume 50% (metade da
       // jornada), o padrão mais comum pra redução por prova. Só valida quando preenchido.
@@ -85,7 +87,8 @@ export default function TratamentoTab() {
     setMotivo("")
     setError(null)
     setNotice(
-      lancamentoTipo === "falta" ? "Falta abonada salva."
+      lancamentoTipo === "falta"
+        ? (motivoFalta === FALTA_NAO_JUSTIFICADA ? "Falta não justificada lançada — o dia foi descontado do saldo." : "Falta abonada salva.")
         : lancamentoTipo === "carga_reduzida" ? "Carga reduzida salva."
         : "Home office salvo — o limitador de localização fica liberado nesse dia."
     )
@@ -256,7 +259,8 @@ export default function TratamentoTab() {
           <h3 className="mb-1 text-base font-semibold text-neutral-900">Lançar falta, carga reduzida ou home office</h3>
           <p className="mb-4 text-xs text-neutral-500">
             Não é usado pra corrigir marcação — isso é feito na lista acima. Falta abonada conta o dia inteiro
-            como se tivesse trabalhado (ex.: atestado, férias). Carga reduzida é pra quando o funcionário
+            como se tivesse trabalhado (ex.: atestado, férias). Falta não justificada faz o oposto — desconta
+            o dia inteiro do saldo, já que não há amparo legal pra abonar. Carga reduzida é pra quando o funcionário
             trabalha de verdade, só que uma fração do dia — ex.: estagiário com prova na faculdade, que
             comparece só metade da jornada; a meta daquele dia cai proporcionalmente, e a tolerância normal
             de 10min continua valendo em cima da meta reduzida. Home office marca o dia como trabalho remoto
@@ -265,7 +269,7 @@ export default function TratamentoTab() {
           </p>
           <form className="grid grid-cols-1 gap-4 sm:grid-cols-2" onSubmit={handleSubmitFalta}>
             <Select label="Tipo de lançamento" value={lancamentoTipo} onChange={(e) => setLancamentoTipo(e.target.value)}>
-              <option value="falta">Falta abonada</option>
+              <option value="falta">Falta</option>
               <option value="carga_reduzida">Carga reduzida</option>
               <option value="home_office">Home office</option>
             </Select>
@@ -284,14 +288,19 @@ export default function TratamentoTab() {
             )}
 
             <TextField
-              label={lancamentoTipo === "home_office" ? "Motivo / observação (opcional)" : "Motivo / observação"}
+              label={
+                lancamentoTipo === "home_office" || (lancamentoTipo === "falta" && motivoFalta === FALTA_NAO_JUSTIFICADA)
+                  ? "Motivo / observação (opcional)" : "Motivo / observação"
+              }
               className="sm:col-span-2"
               placeholder={lancamentoTipo === "carga_reduzida" ? "ex.: Prova na faculdade" : lancamentoTipo === "home_office" ? "ex.: Trabalho remoto autorizado" : ""}
               value={motivo} onChange={(e) => setMotivo(e.target.value)}
             />
             <div className="sm:col-span-2">
               <Button type="submit">
-                {lancamentoTipo === "falta" ? "Salvar falta abonada" : lancamentoTipo === "carga_reduzida" ? "Salvar carga reduzida" : "Salvar home office"}
+                {lancamentoTipo === "falta"
+                  ? (motivoFalta === FALTA_NAO_JUSTIFICADA ? "Salvar falta não justificada" : "Salvar falta abonada")
+                  : lancamentoTipo === "carga_reduzida" ? "Salvar carga reduzida" : "Salvar home office"}
               </Button>
             </div>
           </form>

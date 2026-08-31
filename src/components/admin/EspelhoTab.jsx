@@ -317,6 +317,14 @@ export default function EspelhoTab() {
                         {s.status === "abonado" && (
                           <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">Abonado</span>
                         )}
+                        {s.status === "falta_injustificada" && (
+                          <span
+                            title="Falta sem justificativa — dia integral descontado do saldo"
+                            className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700"
+                          >
+                            Falta não justificada
+                          </span>
+                        )}
                         {futuro && (
                           <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs font-medium text-neutral-500">Ainda não ocorreu</span>
                         )}
