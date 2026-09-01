@@ -60,14 +60,17 @@ export const FALTA_MOTIVOS = [
 ]
 export const FALTA_NAO_JUSTIFICADA = "Falta não justificada"
 
-// Tolerância de ponto adotada pelo escritório: até 10 minutos de variação por marcação
-// (entrada, intervalo ou saída) não é descontado nem contado como extra — acima disso, conta
-// o valor cheio. O texto literal do art. 58 §1º CLT usa 5min por marcação + 10min de soma
-// diária, mas na prática confirmada com o escritório o corte usado é 10min direto por
-// marcação, sem a soma diária separada.
-export const TOLERANCIA_POR_MARCACAO_MIN = 10
-// Usado só no modelo alternativo (total do dia), quando não há entrada/saída prevista
-// cadastradas — compara o total trabalhado do dia contra a meta, com o mesmo corte de 10min.
+// Tolerância de ponto do art. 58 §1º CLT: "não serão descontadas nem computadas como jornada
+// extraordinária as variações de horário no registro de ponto não excedentes de cinco minutos,
+// observado o limite máximo de dez minutos diários". É uma regra tudo-ou-nada por dia: só é
+// perdoado quando NENHUMA marcação isolada passa de 5min E a soma de todos os desvios do dia não
+// passa de 10min — se qualquer uma das duas condições falhar, a tolerância cai por inteiro e
+// todas as marcações contam pelo horário real batido, mesmo as que isoladamente ficaram dentro
+// de 5min.
+export const TOLERANCIA_POR_MARCACAO_MIN = 5
+// Teto diário somado dos desvios tolerados (mesmo art. 58 §1º). Usado tanto como a soma máxima
+// no modelo por marcação quanto, isoladamente, no modelo alternativo (total do dia) usado quando
+// não há entrada/saída prevista cadastradas.
 export const TOLERANCIA_DIARIA_MIN = 10
 
 /* Regimes de jornada fixos oferecidos no cadastro. As horas semanais e mensais
@@ -274,14 +277,17 @@ function deriveIntervalSchedule(entradaPrevista, horasDiarias, intervaloMin) {
   return [toHHMM(inicioIntervaloMin), toHHMM(fimIntervaloMin)]
 }
 
-/* Aplica a tolerância de variação de ponto por marcação: cada marcação (entrada, início/fim
-   de intervalo, saída) é comparada com o horário esperado dela. Se variar até 10 minutos,
-   é tolerada (conta como se fosse o horário esperado); se passar de 10 minutos, conta o
-   valor cheio daquela marcação. Cada marcação é avaliada de forma independente — uma
-   marcação dentro do limite é tolerada mesmo que outra marcação do mesmo dia passe do
-   limite (essa outra nunca é tolerada, entra pelo valor integral). Só se aplica quando o
-   funcionário tem entrada/saída prevista cadastradas (senão cai no modelo mais simples de
-   comparar só o total do dia contra a meta, que não depende de horário fixo). */
+/* Aplica a tolerância de variação de ponto por marcação (art. 58 §1º CLT): cada marcação
+   (entrada, início/fim de intervalo, saída) é comparada com o horário esperado dela. Marcação
+   com desvio isolado acima de 5min NUNCA é perdoada — conta sempre pelo valor real (atraso na
+   entrada/retorno do intervalo é hora negativa, atraso na saída é hora positiva, e vice-versa
+   pro lado do adiantamento), independente do que acontece com as outras marcações do dia. Já as
+   marcações com desvio de até 5min entram na regra dos 10min: são "candidatas" à tolerância, e
+   a SOMA dos desvios só entre essas candidatas não pode passar de 10min no dia — se passar,
+   nenhuma delas é perdoada (conta tudo pelo valor real); se não passar, todas são perdoadas.
+   Uma marcação grande (>5min) não "contamina" as pequenas — cada grupo é avaliado à parte. Só
+   se aplica quando o funcionário tem entrada/saída prevista cadastradas (senão cai no modelo
+   mais simples de comparar só o total do dia contra a meta, que não depende de horário fixo). */
 function buildDaySummaryComSchedule(dayKey, merged, employee, expectedMinutes, cicloTamanhoDia, incluirIntervalo) {
   const horasDiarias = employee.horasDiarias
   const schedule = cicloTamanhoDia === 2
@@ -297,15 +303,13 @@ function buildDaySummaryComSchedule(dayKey, merged, employee, expectedMinutes, c
     const expected = expectedTimeOnDay(dayKey, schedule[i % cicloTamanhoDia])
     return expected ? (new Date(p.time) - expected) / 60000 : null
   })
-  // Cada marcação é avaliada de forma independente: se a variação dela sozinha for de até
-  // 10 minutos, é tolerada (conta como se fosse o horário esperado); se passar de 10
-  // minutos, conta o valor cheio. Não tem soma diária adicional — é o corte de 10 minutos
-  // aplicado marcação por marcação, confirmado na prática pelo escritório.
-  const tolerada = deviations.map((d) => d !== null && Math.abs(d) <= TOLERANCIA_POR_MARCACAO_MIN)
+  const candidata = deviations.map((d) => d !== null && Math.abs(d) <= TOLERANCIA_POR_MARCACAO_MIN)
+  const somaCandidatas = deviations.reduce((acc, d, i) => acc + (candidata[i] ? Math.abs(d) : 0), 0)
+  const candidatasToleradas = somaCandidatas <= TOLERANCIA_DIARIA_MIN
 
   const mergedAjustado = merged.map((p, i) => {
-    if (!tolerada[i]) return p
     const expected = expectedTimeOnDay(dayKey, schedule[i % cicloTamanhoDia])
+    if (!candidata[i] || !candidatasToleradas || !expected) return p
     // Mantém "time" com o horário real batido (o que aparece na tela/relatórios); só
     // "timeCalculo" (usado no cálculo de minutos) vira o horário previsto, já que a
     // tolerância diz respeito ao cálculo, não ao registro em si.
