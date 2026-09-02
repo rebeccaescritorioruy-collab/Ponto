@@ -1,4 +1,5 @@
 import ExcelJS from "exceljs"
+import JSZip from "jszip"
 import {
   formatCPF, vinculoLabel, minutesToClock, minutesToHHMM,
   weekdayFullPt, isWeekend, todayKey,
@@ -58,6 +59,15 @@ export function exportEspelhoXLSX(params) {
     triggerDownload(new Blob([buffer], { type: XLSX_MIME }), filename)
   })
   return filename
+}
+
+/** Empacota várias planilhas (uma por funcionário) num único .zip e dispara o download —
+    usado na geração em massa do mês pra todo mundo de uma vez. */
+export async function downloadEspelhosZip(entries, zipFilename) {
+  const zip = new JSZip()
+  entries.forEach(({ filename, buffer }) => zip.file(filename, buffer))
+  const blob = await zip.generateAsync({ type: "blob" })
+  triggerDownload(blob, zipFilename)
 }
 
 /** Calcula as linhas do espelho (uma por dia) num formato puro, reaproveitado tanto pela
@@ -163,7 +173,7 @@ export function computeEspelhoRows(summaries) {
   })
 }
 
-async function buildEspelhoWorkbook(params) {
+export async function buildEspelhoWorkbook(params) {
   const {
     employee: emp, empresa, reportTipo, periodRange,
     summaries, totalWorked, totalPositivas, totalNegativas,

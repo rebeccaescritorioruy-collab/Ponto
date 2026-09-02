@@ -7,7 +7,7 @@ import {
   minutesToHHMM, monthLabelPt, weekdayAbbrev, formatTimeShort, isWeekend,
   limiteSemanalEstagioMinutos,
 } from "../../lib/calculo"
-import { exportEspelhoCSV, exportEspelhoXLSX } from "../../lib/export"
+import { exportEspelhoCSV, exportEspelhoXLSX, buildEspelhoWorkbook, downloadEspelhosZip } from "../../lib/export"
 import { mapsLink, formatAltitude } from "../../lib/geo"
 import Card from "../ui/Card"
 import Select from "../ui/Select"
@@ -40,6 +40,10 @@ export default function EspelhoTab() {
   const [periodData, setPeriodData] = useState({ key: "", punches: [], treatmentsByDay: {} })
   const [showPreview, setShowPreview] = useState(false)
   const [error, setError] = useState(null)
+
+  const [bulkMonth, setBulkMonth] = useState(todayKey().slice(0, 7))
+  const [bulkStatus, setBulkStatus] = useState(null)
+  const [bulkError, setBulkError] = useState(null)
 
   const employee = employees.find((e) => e.cpf === cpf)
   const periodRange = useMemo(
@@ -166,9 +170,99 @@ export default function EspelhoTab() {
     }
   }
 
+  // Gera a planilha mensal de todo mundo de uma vez (menos usuários de teste, identificados
+  // pelo nome) e empacota tudo num único .zip — evita ter que gerar funcionário por
+  // funcionário na mão todo mês.
+  async function handleGerarTodos() {
+    setBulkError(null)
+    const alvo = employees.filter((e) => e.ativo !== false && !e.nome.toLowerCase().includes("teste"))
+    if (alvo.length === 0) {
+      setBulkError("Nenhum funcionário elegível encontrado (todos ativos foram identificados como teste).")
+      return
+    }
+    const { start, end } = monthRangeOf(bulkMonth)
+    setBulkStatus({ atual: 0, total: alvo.length, nome: "" })
+
+    const diasDoMes = []
+    {
+      const cursor = new Date(`${start}T00:00:00`)
+      const endDate = new Date(`${end}T00:00:00`)
+      while (cursor <= endDate) {
+        diasDoMes.push(todayKey(cursor))
+        cursor.setDate(cursor.getDate() + 1)
+      }
+    }
+
+    const entries = []
+    for (let i = 0; i < alvo.length; i++) {
+      const emp = alvo[i]
+      setBulkStatus({ atual: i + 1, total: alvo.length, nome: emp.nome })
+
+      const [{ data: punchRows, error: pErr }, { data: treatRows, error: tErr }] = await Promise.all([
+        supabase.from("punches").select("*").eq("cpf", emp.cpf)
+          .gte("time", `${start}T00:00:00`).lte("time", `${end}T23:59:59`).order("time"),
+        supabase.from("treatments").select("*").eq("cpf", emp.cpf)
+          .gte("date", start).lte("date", end),
+      ])
+      if (pErr || tErr) {
+        setBulkError(`Erro ao buscar dados de ${emp.nome}: ${(pErr || tErr).message}`)
+        setBulkStatus(null)
+        return
+      }
+
+      const treatmentsByDay = {}
+      ;(treatRows || []).forEach((row) => {
+        treatmentsByDay[row.date] = [...(treatmentsByDay[row.date] || []), mapTreatmentRow(row)]
+      })
+      const byDayEmp = {}
+      diasDoMes.forEach((day) => { byDayEmp[day] = [] })
+      ;(punchRows || []).forEach((p) => {
+        const dk = todayKey(new Date(p.time))
+        if (!byDayEmp[dk]) byDayEmp[dk] = []
+        byDayEmp[dk].push(p)
+      })
+
+      const summariesEmp = {}
+      diasDoMes.forEach((day) => {
+        summariesEmp[day] = buildDaySummary(day, byDayEmp[day], treatmentsByDay[day] || [], emp)
+      })
+      const totalWorkedEmp = Object.values(summariesEmp).reduce((acc, s) => acc + s.minutesCreditadas, 0)
+      const totalPositivasEmp = Object.values(summariesEmp).reduce((acc, s) => acc + (s.balance > 0 ? s.balance : 0), 0)
+      const totalNegativasEmp = Object.values(summariesEmp).reduce((acc, s) => acc + (s.balance < 0 ? -s.balance : 0), 0)
+
+      const buffer = await buildEspelhoWorkbook({
+        employee: emp, empresa: empresaDoVinculo(employers, emp.vinculo), reportTipo: "mensal",
+        periodRange: { start, end }, summaries: summariesEmp,
+        totalWorked: totalWorkedEmp, totalPositivas: totalPositivasEmp, totalNegativas: totalNegativasEmp,
+      })
+      entries.push({ filename: `folha-ponto-${emp.nome.replace(/\s+/g, "_")}-mensal-${bulkMonth}.xlsx`, buffer })
+    }
+
+    await downloadEspelhosZip(entries, `planilhas-${bulkMonth}.zip`)
+    setBulkStatus(null)
+  }
+
   return (
     <div className="space-y-6">
       {error && <Alert tone="error">{error}</Alert>}
+      {bulkError && <Alert tone="error">{bulkError}</Alert>}
+
+      <Card>
+        <h3 className="mb-1 text-base font-semibold text-neutral-900">Gerar planilhas do mês (todos de uma vez)</h3>
+        <p className="mb-4 text-xs text-neutral-500">
+          Gera a planilha mensal de cada funcionário ativo e baixa tudo junto num único arquivo .zip.
+          Funcionários com "teste" no nome são ignorados automaticamente.
+        </p>
+        <div className="flex flex-wrap items-end gap-4">
+          <TextField
+            label="Mês" type="month" value={bulkMonth} onChange={(e) => setBulkMonth(e.target.value)}
+            disabled={Boolean(bulkStatus)}
+          />
+          <Button onClick={handleGerarTodos} disabled={Boolean(bulkStatus)}>
+            {bulkStatus ? `Gerando… (${bulkStatus.atual}/${bulkStatus.total}${bulkStatus.nome ? ` — ${bulkStatus.nome}` : ""})` : "Gerar planilhas de todos (.zip)"}
+          </Button>
+        </div>
+      </Card>
 
       <Card>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
