@@ -183,6 +183,16 @@ export function minutesToHHMM(min) {
   return `${sign}${h}h${String(m).padStart(2, "0")}`
 }
 
+/* Descarta os segundos de uma marcação (horário "fechado" no minuto) — usada antes de qualquer
+   conta de saldo/tolerância, pra bater com o jeito que o escritório confere na mão (olhando só
+   HH:MM). Os segundos continuam guardados no registro original pra fins de auditoria (extrato de
+   marcações, comprovante); só o cálculo de horas ignora essa fração. */
+function truncarSegundos(iso) {
+  const d = new Date(iso)
+  d.setSeconds(0, 0)
+  return d.toISOString()
+}
+
 export function calcWorkedMinutes(punches, incluirIntervalo = false, cicloTamanho = 4) {
   const sorted = [...punches].sort((a, b) => new Date(a.time) - new Date(b.time))
   let total = 0
@@ -259,68 +269,58 @@ function expectedTimeOnDay(dayKey, hhmm) {
   return isNaN(d.getTime()) ? null : d
 }
 
-/* Deriva os horários previstos de início/fim do intervalo a partir da entrada prevista e da
-   jornada diária, centralizando o intervalo no meio do turno — usado só pra montar o
-   horário esperado de cada marcação na tolerância por marcação (schedule abaixo). */
-function deriveIntervalSchedule(entradaPrevista, horasDiarias, intervaloMin) {
-  if (!entradaPrevista) return [null, null]
-  const workMin = (Number(horasDiarias) || 0) * 60
-  const [h, m] = entradaPrevista.split(":").map(Number)
-  const startMinutesOfDay = h * 60 + m
-  const inicioIntervaloMin = startMinutesOfDay + workMin / 2
-  const fimIntervaloMin = inicioIntervaloMin + intervaloMin
-  const toHHMM = (totalMin) => {
-    const hh = Math.floor(totalMin / 60) % 24
-    const mm = Math.round(totalMin % 60)
-    return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`
-  }
-  return [toHHMM(inicioIntervaloMin), toHHMM(fimIntervaloMin)]
-}
-
-/* Aplica a tolerância de variação de ponto por marcação (art. 58 §1º CLT): cada marcação
-   (entrada, início/fim de intervalo, saída) é comparada com o horário esperado dela. Marcação
-   com desvio isolado acima de 5min NUNCA é perdoada — conta sempre pelo valor real (atraso na
-   entrada/retorno do intervalo é hora negativa, atraso na saída é hora positiva, e vice-versa
-   pro lado do adiantamento), independente do que acontece com as outras marcações do dia. Já as
-   marcações com desvio de até 5min entram na regra dos 10min: são "candidatas" à tolerância, e
-   a SOMA dos desvios só entre essas candidatas não pode passar de 10min no dia — se passar,
-   nenhuma delas é perdoada (conta tudo pelo valor real); se não passar, todas são perdoadas.
-   Uma marcação grande (>5min) não "contamina" as pequenas — cada grupo é avaliado à parte. Só
-   se aplica quando o funcionário tem entrada/saída prevista cadastradas (senão cai no modelo
-   mais simples de comparar só o total do dia contra a meta, que não depende de horário fixo). */
+/* Aplica a tolerância de variação de ponto (art. 58 §1º CLT) em três frentes possíveis por dia:
+   entrada (contra a entrada prevista), saída (contra a saída prevista) e — quando o dia tem
+   intervalo — a DURAÇÃO do intervalo (fim menos início, contra a duração esperada), não o
+   horário exato em que ele aconteceu. Isso é proposital: o horário do almoço pode variar o dia
+   inteiro sem problema nenhum, o que importa é se ele durou perto do esperado. Cada frente é
+   avaliada de forma independente: uma frente com desvio acima de 5min nunca é perdoada, mas
+   isso não invalida o perdão das outras frentes do mesmo dia que estejam dentro do limite. A
+   soma dos desvios só entre as frentes que isoladamente ficam ≤5min não pode passar de 10min no
+   dia — se passar, nenhuma delas é perdoada; se não passar, todas são. */
 function buildDaySummaryComSchedule(dayKey, merged, employee, expectedMinutes, cicloTamanhoDia, incluirIntervalo) {
-  const horasDiarias = employee.horasDiarias
-  const schedule = cicloTamanhoDia === 2
-    ? [employee.entradaPrevista, employee.saidaPrevista]
-    : (() => {
-        const [inicioIntervalo, fimIntervalo] = deriveIntervalSchedule(
-          employee.entradaPrevista, horasDiarias, intervaloEfetivoMinutos(employee)
-        )
-        return [employee.entradaPrevista, inicioIntervalo, fimIntervalo, employee.saidaPrevista]
-      })()
+  const entradaReal = new Date(merged[0].time)
+  const saidaReal = new Date(merged[merged.length - 1].time)
+  const entradaPrevista = expectedTimeOnDay(dayKey, employee.entradaPrevista)
+  const saidaPrevista = expectedTimeOnDay(dayKey, employee.saidaPrevista)
 
-  const deviations = merged.map((p, i) => {
-    const expected = expectedTimeOnDay(dayKey, schedule[i % cicloTamanhoDia])
-    return expected ? (new Date(p.time) - expected) / 60000 : null
-  })
-  const candidata = deviations.map((d) => d !== null && Math.abs(d) <= TOLERANCIA_POR_MARCACAO_MIN)
-  const somaCandidatas = deviations.reduce((acc, d, i) => acc + (candidata[i] ? Math.abs(d) : 0), 0)
+  const devEntrada = entradaPrevista ? (entradaReal - entradaPrevista) / 60000 : null
+  const devSaida = saidaPrevista ? (saidaReal - saidaPrevista) / 60000 : null
+
+  let duracaoReal = null
+  let duracaoEsperada = null
+  let devIntervalo = null
+  if (cicloTamanhoDia === 4) {
+    const inicioIntervaloReal = new Date(merged[1].time)
+    const fimIntervaloReal = new Date(merged[2].time)
+    duracaoReal = (fimIntervaloReal - inicioIntervaloReal) / 60000
+    duracaoEsperada = intervaloEfetivoMinutos(employee)
+    devIntervalo = duracaoReal - duracaoEsperada
+  }
+
+  // Cada frente (entrada, saída, duração do intervalo) é avaliada de forma independente: uma
+  // frente com desvio acima de 5min NUNCA é perdoada, mas isso não invalida o perdão das outras
+  // frentes do mesmo dia que estejam dentro do limite. A soma dos desvios só entre as frentes
+  // que isoladamente ficam ≤5min ("candidatas") não pode passar de 10min no dia — se passar,
+  // nenhuma das candidatas é perdoada; se não passar, todas são.
+  const desvios = [devEntrada, devSaida, devIntervalo].filter((d) => d !== null)
+  const somaCandidatas = desvios.reduce((acc, d) => acc + (Math.abs(d) <= TOLERANCIA_POR_MARCACAO_MIN ? Math.abs(d) : 0), 0)
   const candidatasToleradas = somaCandidatas <= TOLERANCIA_DIARIA_MIN
 
-  const mergedAjustado = merged.map((p, i) => {
-    const expected = expectedTimeOnDay(dayKey, schedule[i % cicloTamanhoDia])
-    if (!candidata[i] || !candidatasToleradas || !expected) return p
-    // Mantém "time" com o horário real batido (o que aparece na tela/relatórios); só
-    // "timeCalculo" (usado no cálculo de minutos) vira o horário previsto, já que a
-    // tolerância diz respeito ao cálculo, não ao registro em si.
-    return { ...p, timeCalculo: expected.toISOString(), toleranciaAplicada: true }
-  })
+  const entradaTolerada = candidatasToleradas && devEntrada !== null && Math.abs(devEntrada) <= TOLERANCIA_POR_MARCACAO_MIN
+  const saidaTolerada = candidatasToleradas && devSaida !== null && Math.abs(devSaida) <= TOLERANCIA_POR_MARCACAO_MIN
+  const intervaloTolerado = candidatasToleradas && devIntervalo !== null && Math.abs(devIntervalo) <= TOLERANCIA_POR_MARCACAO_MIN
 
-  const minutes = calcWorkedMinutes(
-    mergedAjustado.map((p) => ({ time: p.timeCalculo ?? p.time })), incluirIntervalo, cicloTamanhoDia
-  )
+  const entradaCalc = entradaTolerada ? entradaPrevista : entradaReal
+  const saidaCalc = saidaTolerada ? saidaPrevista : saidaReal
+
+  // Duração do intervalo usada no cálculo: a esperada (se tolerada) ou a real batida. Pra
+  // funcionário cujo intervalo conta dentro da jornada (estagiário 5-6h), a duração do
+  // intervalo não desconta nada, então não entra na conta.
+  const duracaoUsada = incluirIntervalo ? 0 : (intervaloTolerado ? duracaoEsperada : (duracaoReal ?? 0))
+  const minutes = Math.round((saidaCalc - entradaCalc) / 60000 - duracaoUsada)
   const balance = minutes - expectedMinutes
-  return { minutes, balance, toleranciaAplicada: mergedAjustado.some((p) => p.toleranciaAplicada) }
+  return { minutes, balance, toleranciaAplicada: entradaTolerada || saidaTolerada || intervaloTolerado }
 }
 
 /* Aplica a tolerância do art. 58, §1º da CLT sobre o TOTAL do dia: compara direto o total
@@ -336,7 +336,9 @@ export function buildDaySummary(dayKey, punches, treatments, employee) {
   const inclusoes = treatments
     .filter((t) => t.kind === "inclusao")
     .map((t) => ({ nsr: null, type: t.tipoMarcacao, time: t.horario, incluida: true, motivo: t.motivo }))
-  const merged = [...punches, ...inclusoes].sort((a, b) => new Date(a.time) - new Date(b.time))
+  const merged = [...punches, ...inclusoes]
+    .map((p) => ({ ...p, time: truncarSegundos(p.time) }))
+    .sort((a, b) => new Date(a.time) - new Date(b.time))
   // Ciclo do dia (2 ou 4 marcações) considerando o regime cheio E um eventual tratamento de
   // carga reduzida nesse dia (a mesma função usada pelo botão de bater ponto, pra nunca
   // desalinhar os dois).
