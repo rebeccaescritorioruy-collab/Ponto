@@ -6,6 +6,7 @@ import FuncionariosTab from "../components/admin/FuncionariosTab"
 import EmpresasTab from "../components/admin/EmpresasTab"
 import SedesTab from "../components/admin/SedesTab"
 import EspelhoTab from "../components/admin/EspelhoTab"
+import RelatorioMensalTab from "../components/admin/RelatorioMensalTab"
 import TratamentoTab from "../components/admin/TratamentoTab"
 import ConfiguracoesTab from "../components/admin/ConfiguracoesTab"
 
@@ -14,6 +15,7 @@ const TABS = [
   { key: "empresas", label: "Empresas" },
   { key: "sedes", label: "Sedes" },
   { key: "espelho", label: "Espelho de ponto" },
+  { key: "relatorio", label: "Relatório mensal" },
   { key: "tratamento", label: "Faltas e ajustes" },
   { key: "config", label: "Configurações" },
 ]
@@ -31,6 +33,7 @@ export default function AdminPage() {
       {tab === "empresas" && <EmpresasTab />}
       {tab === "sedes" && <SedesTab />}
       {tab === "espelho" && <EspelhoTab />}
+      {tab === "relatorio" && <RelatorioMensalTab />}
       {tab === "tratamento" && <TratamentoTab />}
       {tab === "config" && <ConfiguracoesTab />}
     </div>
