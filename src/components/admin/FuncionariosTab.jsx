@@ -28,7 +28,6 @@ export default function FuncionariosTab() {
   const [resetPwCpf, setResetPwCpf] = useState(null)
   const [resetPwValue, setResetPwValue] = useState("")
   const [deleteCpf, setDeleteCpf] = useState(null)
-  const [deleteBloqueadaPorHistorico, setDeleteBloqueadaPorHistorico] = useState(false)
   const [error, setError] = useState(null)
   const [notice, setNotice] = useState(null)
   const [busca, setBusca] = useState("")
@@ -91,30 +90,21 @@ export default function FuncionariosTab() {
 
   async function submitDelete() {
     const { error } = await supabase.from("employees").delete().eq("cpf", deleteCpf)
-    if (error) {
-      if (error.code === "23503") {
-        setError(
-          "Não é possível excluir: já existem marcações de ponto (ou faltas/ajustes) registradas para esse CPF, "
-          + "e a lei exige guardar esse histórico. Use \"Desativar\" para impedir o acesso mantendo o histórico "
-          + "— ou, se for um cadastro de teste sem valor legal, use \"Excluir tudo mesmo assim\" abaixo."
-        )
-        setDeleteBloqueadaPorHistorico(true)
-      } else {
-        setError(error.message)
-      }
+    if (!error) {
+      setDeleteCpf(null)
+      flashNotice("Funcionário excluído.")
+      reload()
       return
     }
-    setDeleteCpf(null)
-    setDeleteBloqueadaPorHistorico(false)
-    flashNotice("Funcionário excluído.")
-    reload()
-  }
+    if (error.code !== "23503") {
+      setError(error.message)
+      return
+    }
 
-  // Escape hatch pra cadastros de teste (ou qualquer caso em que não exista obrigação legal de
-  // guardar o histórico): apaga as marcações e os ajustes/faltas desse CPF antes do funcionário,
-  // contornando o bloqueio de integridade referencial. Não é a exclusão padrão — só aparece
-  // depois que a exclusão normal já foi recusada por causa do histórico vinculado.
-  async function submitForceDelete() {
+    // Há marcações/faltas vinculadas a esse CPF (é o que bloqueou a exclusão direta acima) —
+    // apaga esse histórico primeiro e tenta de novo, num único clique. Vale pra qualquer
+    // cadastro (não só teste): quem clicou em "Excluir permanentemente" já confirmou que quer
+    // isso, incluindo o histórico.
     const [{ error: punchesError }, { error: treatmentsError }] = await Promise.all([
       supabase.from("punches").delete().eq("cpf", deleteCpf),
       supabase.from("treatments").delete().eq("cpf", deleteCpf),
@@ -123,14 +113,13 @@ export default function FuncionariosTab() {
       setError((punchesError || treatmentsError).message)
       return
     }
-    const { error } = await supabase.from("employees").delete().eq("cpf", deleteCpf)
-    if (error) {
-      setError(error.message)
+    const { error: retryError } = await supabase.from("employees").delete().eq("cpf", deleteCpf)
+    if (retryError) {
+      setError(retryError.message)
       return
     }
     setDeleteCpf(null)
-    setDeleteBloqueadaPorHistorico(false)
-    flashNotice("Funcionário e todo o histórico vinculado foram excluídos.")
+    flashNotice("Funcionário e todo o histórico vinculado (marcações e ajustes) foram excluídos.")
     reload()
   }
 
@@ -350,7 +339,7 @@ export default function FuncionariosTab() {
                         <Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => setResetPwCpf(e.cpf)}>Redefinir senha</Button>
                         <Button
                           variant="ghost" className="px-2 py-1 text-xs text-red-600 hover:bg-red-50"
-                          onClick={() => { setError(null); setDeleteBloqueadaPorHistorico(false); setDeleteCpf(e.cpf) }}
+                          onClick={() => { setError(null); setDeleteCpf(e.cpf) }}
                         >
                           Excluir
                         </Button>
@@ -393,27 +382,17 @@ export default function FuncionariosTab() {
           <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-4">
             <p className="text-sm text-red-800">
               Tem certeza que quer excluir <strong>{employees.find((e) => e.cpf === deleteCpf)?.nome}</strong> permanentemente?
-              Essa ação não pode ser desfeita. Se essa pessoa já bateu ponto alguma vez, prefira "Desativar" — a exclusão só
-              funciona para cadastros sem nenhuma marcação, falta ou ajuste vinculado.
+              Essa ação não pode ser desfeita — se essa pessoa já bateu ponto ou tem falta/ajuste lançado, as marcações e os
+              ajustes vinculados a esse CPF também são apagados junto. Pra manter o histórico e só impedir o acesso, use
+              "Desativar" em vez de excluir.
             </p>
             {/* Repete o erro aqui perto do botão — o alerta lá do topo da página passa
                 despercebido, já que essa caixa fica no fim de uma lista comprida. */}
             {error && <p className="mt-2 text-sm font-semibold text-red-900">⚠ {error}</p>}
             <div className="mt-3 flex flex-wrap gap-2">
               <Button variant="danger" onClick={submitDelete}>Excluir permanentemente</Button>
-              <Button variant="secondary" onClick={() => { setError(null); setDeleteBloqueadaPorHistorico(false); setDeleteCpf(null) }}>Cancelar</Button>
+              <Button variant="secondary" onClick={() => { setError(null); setDeleteCpf(null) }}>Cancelar</Button>
             </div>
-            {deleteBloqueadaPorHistorico && (
-              <div className="mt-3 border-t border-red-200 pt-3">
-                <p className="text-xs text-red-700">
-                  Isso apaga <strong>permanentemente</strong> as marcações de ponto e as faltas/ajustes desse CPF junto com o
-                  cadastro — não use pra funcionário de verdade, só pra cadastro de teste sem valor legal.
-                </p>
-                <Button variant="danger" className="mt-2" onClick={submitForceDelete}>
-                  Excluir tudo mesmo assim (funcionário + marcações + ajustes)
-                </Button>
-              </div>
-            )}
           </div>
         )}
       </Card>
