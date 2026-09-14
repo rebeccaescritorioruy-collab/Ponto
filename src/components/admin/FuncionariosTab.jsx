@@ -317,7 +317,7 @@ export default function FuncionariosTab() {
                         <Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => startEdit(e)}>Editar</Button>
                         <Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => toggleActive(e)}>{e.ativo ? "Desativar" : "Reativar"}</Button>
                         <Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => setResetPwCpf(e.cpf)}>Redefinir senha</Button>
-                        <Button variant="ghost" className="px-2 py-1 text-xs text-red-600 hover:bg-red-50" onClick={() => setDeleteCpf(e.cpf)}>Excluir</Button>
+                        <Button variant="ghost" className="px-2 py-1 text-xs text-red-600 hover:bg-red-50" onClick={() => { setError(null); setDeleteCpf(e.cpf) }}>Excluir</Button>
                       </div>
                     </td>
                   </tr>
@@ -360,9 +360,12 @@ export default function FuncionariosTab() {
               Essa ação não pode ser desfeita. Se essa pessoa já bateu ponto alguma vez, prefira "Desativar" — a exclusão só
               funciona para cadastros sem nenhuma marcação, falta ou ajuste vinculado.
             </p>
+            {/* Repete o erro aqui perto do botão — o alerta lá do topo da página passa
+                despercebido, já que essa caixa fica no fim de uma lista comprida. */}
+            {error && <p className="mt-2 text-sm font-semibold text-red-900">⚠ {error}</p>}
             <div className="mt-3 flex gap-2">
               <Button variant="danger" onClick={submitDelete}>Excluir permanentemente</Button>
-              <Button variant="secondary" onClick={() => setDeleteCpf(null)}>Cancelar</Button>
+              <Button variant="secondary" onClick={() => { setError(null); setDeleteCpf(null) }}>Cancelar</Button>
             </div>
           </div>
         )}
