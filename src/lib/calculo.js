@@ -133,15 +133,15 @@ export function limiteSemanalEstagioMinutos(employee) {
   return horasSemanais * 60
 }
 
-/* Para estagiários com jornada de 5h ou 6h/dia, o intervalo de 15 min é uma
-   anotação de bom senso do escritório, mas — diferente da CLT (art. 71, que
-   sempre exclui o intervalo da jornada) — a Lei do Estágio não impõe que o
-   intervalo seja descontado da jornada. Por definição do escritório, esse
-   intervalo é computado dentro das horas diárias do estagiário. No regime de
-   4h/dia (estagiário ou CLT) não há intervalo previsto. */
+/* Para estagiários com jornada de 4h, 5h ou 6h/dia, o intervalo (quando o escritório cadastra
+   um) é uma anotação de bom senso, mas — diferente da CLT (art. 71, que sempre exclui o
+   intervalo da jornada) — a Lei do Estágio não impõe que o intervalo seja descontado da
+   jornada. Por definição do escritório, esse intervalo é computado dentro das horas diárias do
+   estagiário, inclusive no regime de 4h/dia (a CLT não exige intervalo pra 4h, mas se o
+   escritório cadastrar um mesmo assim pro estagiário, ele não deve ser debitado). */
 export function intervaloContaComoJornada(vinculo, horasDiarias) {
   const h = Number(horasDiarias) || 0
-  return vinculo === "estagiario" && h >= 5 && h <= 6
+  return vinculo === "estagiario" && h >= 4 && h <= 6
 }
 
 const MESES_PT = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
@@ -321,6 +321,27 @@ function buildDaySummaryComSchedule(dayKey, merged, employee, expectedMinutes, c
   const minutes = Math.round((saidaCalc - entradaCalc) / 60000 - duracaoUsada)
   const balance = minutes - expectedMinutes
   return { minutes, balance, toleranciaAplicada: entradaTolerada || saidaTolerada || intervaloTolerado }
+}
+
+/* Resolve qual regime (carga horária, horário previsto, intervalo) vale pra um funcionário num
+   dia específico, considerando o histórico de trocas de regime (ex.: mudou de 6h pra 8h a
+   partir de uma data). Usa a linha de "vigencias" com o vigente_desde mais recente que ainda
+   seja <= o dia — sem nenhum histórico (o caso normal), cai de volta pro cadastro atual em
+   "employees" sem alterar nada. Isso evita que mudar a carga horária hoje distorça o cálculo de
+   dias já passados, que continuam usando o regime que valia neles. */
+export function resolveEmployeeForDay(employee, vigencias, dayKey) {
+  if (!employee || !vigencias || vigencias.length === 0) return employee
+  const candidatas = vigencias.filter((v) => v.cpf === employee.cpf && v.vigenteDesde <= dayKey)
+  if (candidatas.length === 0) return employee
+  const maisRecente = candidatas.reduce((a, b) => (b.vigenteDesde > a.vigenteDesde ? b : a))
+  return {
+    ...employee,
+    horasDiarias: maisRecente.horasDiarias ?? employee.horasDiarias,
+    jornadaMensalHoras: maisRecente.jornadaMensalHoras ?? employee.jornadaMensalHoras,
+    entradaPrevista: maisRecente.entradaPrevista ?? employee.entradaPrevista,
+    saidaPrevista: maisRecente.saidaPrevista ?? employee.saidaPrevista,
+    intervaloMinutos: maisRecente.intervaloMinutos ?? employee.intervaloMinutos,
+  }
 }
 
 /* Aplica a tolerância do art. 58, §1º da CLT sobre o TOTAL do dia: compara direto o total

@@ -5,7 +5,7 @@ import { useEmployers } from "../../hooks/useEmployers"
 import {
   todayKey, weekRangeOf, monthRangeOf, buildDaySummary, empresaDoVinculo,
   minutesToHHMM, monthLabelPt, weekdayAbbrev, formatTimeShort, isWeekend,
-  limiteSemanalEstagioMinutos,
+  limiteSemanalEstagioMinutos, resolveEmployeeForDay,
 } from "../../lib/calculo"
 import { exportEspelhoCSV, exportEspelhoXLSX, buildEspelhoWorkbook, downloadEspelhosZip } from "../../lib/export"
 import { mapsLink, formatAltitude } from "../../lib/geo"
@@ -27,6 +27,18 @@ function mapTreatmentRow(row) {
   }
 }
 
+function mapVigenciaRow(row) {
+  return {
+    cpf: row.cpf,
+    vigenteDesde: row.vigente_desde,
+    horasDiarias: row.horas_diarias,
+    jornadaMensalHoras: row.jornada_mensal_horas,
+    entradaPrevista: row.entrada_prevista,
+    saidaPrevista: row.saida_prevista,
+    intervaloMinutos: row.intervalo_minutos,
+  }
+}
+
 export default function EspelhoTab() {
   const { employees } = useEmployees()
   const { employers } = useEmployers()
@@ -37,7 +49,7 @@ export default function EspelhoTab() {
   const [semanaRef, setSemanaRef] = useState(todayKey())
   // Guarda o resultado junto da chave (cpf+período) que o originou — permite derivar
   // "loading"/"dados atuais" sem precisar de um setState síncrono dentro do efeito de busca.
-  const [periodData, setPeriodData] = useState({ key: "", punches: [], treatmentsByDay: {} })
+  const [periodData, setPeriodData] = useState({ key: "", punches: [], treatmentsByDay: {}, vigencias: [] })
   const [showPreview, setShowPreview] = useState(false)
   const [error, setError] = useState(null)
 
@@ -61,17 +73,21 @@ export default function EspelhoTab() {
         .gte("time", `${start}T00:00:00`).lte("time", `${end}T23:59:59`).order("time"),
       supabase.from("treatments").select("*").eq("cpf", cpf)
         .gte("date", start).lte("date", end),
-    ]).then(([{ data: punchRows, error: pErr }, { data: treatRows, error: tErr }]) => {
+      supabase.from("regime_vigencias").select("*").eq("cpf", cpf),
+    ]).then(([{ data: punchRows, error: pErr }, { data: treatRows, error: tErr }, { data: vigRows, error: vErr }]) => {
       if (cancelled) return
-      if (pErr || tErr) {
-        setError((pErr || tErr).message)
+      if (pErr || tErr || vErr) {
+        setError((pErr || tErr || vErr).message)
         return
       }
       const treatmentsByDay = {}
       ;(treatRows || []).forEach((row) => {
         treatmentsByDay[row.date] = [...(treatmentsByDay[row.date] || []), mapTreatmentRow(row)]
       })
-      setPeriodData({ key: periodKey, punches: punchRows || [], treatmentsByDay })
+      setPeriodData({
+        key: periodKey, punches: punchRows || [], treatmentsByDay,
+        vigencias: (vigRows || []).map(mapVigenciaRow),
+      })
       setError(null)
     })
     return () => { cancelled = true }
@@ -84,6 +100,10 @@ export default function EspelhoTab() {
   )
   const treatmentsByDay = useMemo(
     () => (periodData.key === periodKey ? periodData.treatmentsByDay : {}),
+    [periodData, periodKey]
+  )
+  const vigencias = useMemo(
+    () => (periodData.key === periodKey ? periodData.vigencias : []),
     [periodData, periodKey]
   )
 
@@ -108,10 +128,11 @@ export default function EspelhoTab() {
     if (!employee) return {}
     const out = {}
     Object.keys(byDay).forEach((day) => {
-      out[day] = buildDaySummary(day, byDay[day], treatmentsByDay[day] || [], employee)
+      const employeeDoDia = resolveEmployeeForDay(employee, vigencias, day)
+      out[day] = buildDaySummary(day, byDay[day], treatmentsByDay[day] || [], employeeDoDia)
     })
     return out
-  }, [byDay, treatmentsByDay, employee])
+  }, [byDay, treatmentsByDay, employee, vigencias])
 
   const periodTargetMinutes = useMemo(() => {
     if (!employee) return 0
@@ -198,14 +219,15 @@ export default function EspelhoTab() {
       const emp = alvo[i]
       setBulkStatus({ atual: i + 1, total: alvo.length, nome: emp.nome })
 
-      const [{ data: punchRows, error: pErr }, { data: treatRows, error: tErr }] = await Promise.all([
+      const [{ data: punchRows, error: pErr }, { data: treatRows, error: tErr }, { data: vigRows, error: vErr }] = await Promise.all([
         supabase.from("punches").select("*").eq("cpf", emp.cpf)
           .gte("time", `${start}T00:00:00`).lte("time", `${end}T23:59:59`).order("time"),
         supabase.from("treatments").select("*").eq("cpf", emp.cpf)
           .gte("date", start).lte("date", end),
+        supabase.from("regime_vigencias").select("*").eq("cpf", emp.cpf),
       ])
-      if (pErr || tErr) {
-        setBulkError(`Erro ao buscar dados de ${emp.nome}: ${(pErr || tErr).message}`)
+      if (pErr || tErr || vErr) {
+        setBulkError(`Erro ao buscar dados de ${emp.nome}: ${(pErr || tErr || vErr).message}`)
         setBulkStatus(null)
         return
       }
@@ -214,6 +236,7 @@ export default function EspelhoTab() {
       ;(treatRows || []).forEach((row) => {
         treatmentsByDay[row.date] = [...(treatmentsByDay[row.date] || []), mapTreatmentRow(row)]
       })
+      const vigenciasEmp = (vigRows || []).map(mapVigenciaRow)
       const byDayEmp = {}
       diasDoMes.forEach((day) => { byDayEmp[day] = [] })
       ;(punchRows || []).forEach((p) => {
@@ -224,7 +247,8 @@ export default function EspelhoTab() {
 
       const summariesEmp = {}
       diasDoMes.forEach((day) => {
-        summariesEmp[day] = buildDaySummary(day, byDayEmp[day], treatmentsByDay[day] || [], emp)
+        const empDoDia = resolveEmployeeForDay(emp, vigenciasEmp, day)
+        summariesEmp[day] = buildDaySummary(day, byDayEmp[day], treatmentsByDay[day] || [], empDoDia)
       })
       const totalWorkedEmp = Object.values(summariesEmp).reduce((acc, s) => acc + s.minutesCreditadas, 0)
       const totalPositivasEmp = Object.values(summariesEmp).reduce((acc, s) => acc + (s.balance > 0 ? s.balance : 0), 0)

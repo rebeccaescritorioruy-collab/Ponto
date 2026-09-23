@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react"
 import { supabase } from "../../lib/supabase"
 import { useEmployees } from "../../hooks/useEmployees"
 import {
-  todayKey, monthRangeOf, monthLabelPt, buildDaySummary, minutesToHHMM, vinculoLabel,
+  todayKey, monthRangeOf, monthLabelPt, buildDaySummary, minutesToHHMM, vinculoLabel, resolveEmployeeForDay,
 } from "../../lib/calculo"
 import Card from "../ui/Card"
 import TextField from "../ui/TextField"
@@ -17,6 +17,18 @@ function mapTreatmentRow(row) {
     tipoMarcacao: row.tipo_marcacao,
     horario: row.horario,
     percentualCarga: row.percentual_carga,
+  }
+}
+
+function mapVigenciaRow(row) {
+  return {
+    cpf: row.cpf,
+    vigenteDesde: row.vigente_desde,
+    horasDiarias: row.horas_diarias,
+    jornadaMensalHoras: row.jornada_mensal_horas,
+    entradaPrevista: row.entrada_prevista,
+    saidaPrevista: row.saida_prevista,
+    intervaloMinutos: row.intervalo_minutos,
   }
 }
 
@@ -63,18 +75,20 @@ export default function RelatorioMensalTab() {
 
     Promise.all(
       alvo.map(async (emp) => {
-        const [{ data: punchRows, error: pErr }, { data: treatRows, error: tErr }] = await Promise.all([
+        const [{ data: punchRows, error: pErr }, { data: treatRows, error: tErr }, { data: vigRows, error: vErr }] = await Promise.all([
           supabase.from("punches").select("*").eq("cpf", emp.cpf)
             .gte("time", `${start}T00:00:00`).lte("time", `${end}T23:59:59`).order("time"),
           supabase.from("treatments").select("*").eq("cpf", emp.cpf)
             .gte("date", start).lte("date", end),
+          supabase.from("regime_vigencias").select("*").eq("cpf", emp.cpf),
         ])
-        if (pErr || tErr) throw (pErr || tErr)
+        if (pErr || tErr || vErr) throw (pErr || tErr || vErr)
 
         const treatmentsByDay = {}
         ;(treatRows || []).forEach((row) => {
           treatmentsByDay[row.date] = [...(treatmentsByDay[row.date] || []), mapTreatmentRow(row)]
         })
+        const vigencias = (vigRows || []).map(mapVigenciaRow)
         const byDay = {}
         dias.forEach((d) => { byDay[d] = [] })
         ;(punchRows || []).forEach((p) => {
@@ -87,7 +101,8 @@ export default function RelatorioMensalTab() {
         let negativas = 0
         let trabalhado = 0
         dias.forEach((d) => {
-          const s = buildDaySummary(d, byDay[d], treatmentsByDay[d] || [], emp)
+          const empDoDia = resolveEmployeeForDay(emp, vigencias, d)
+          const s = buildDaySummary(d, byDay[d], treatmentsByDay[d] || [], empDoDia)
           if (s.balance > 0) positivas += s.balance
           else if (s.balance < 0) negativas += -s.balance
           trabalhado += s.minutesCreditadas
