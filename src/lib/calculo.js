@@ -201,12 +201,31 @@ export function calcWorkedMinutes(punches, incluirIntervalo = false, cicloTamanh
     // Ciclo de 2 (jornada contínua, sem intervalo): só Entrada→Saída. Ciclo de 4 (padrão):
     // Entrada→Início intervalo e Fim intervalo→Saída sempre contam; o intervalo em si (idx 1)
     // só conta pra estagiários de 5-6h, cujo intervalo é computado dentro da jornada.
-    const conta = cicloTamanho === 2 ? idx === 0 : (idx === 0 || idx === 2 || (incluirIntervalo && idx === 1))
+    const duracao = (new Date(sorted[i + 1].time) - new Date(sorted[i].time)) / 60000
+    // O segmento de intervalo (idx 1) só entra na conta quando ele conta como jornada
+    // (estagiário de 4h–6h) ou quando durou mais de 15 min — Súmula 437, II, do TST: intervalo de
+    // até 15 min não é descontado do tempo de trabalho.
+    const conta = cicloTamanho === 2 ? idx === 0 : (idx === 0 || idx === 2 || (idx === 1 && intervaloDescontaDaJornada(duracao, incluirIntervalo)))
     if (conta) {
-      total += (new Date(sorted[i + 1].time) - new Date(sorted[i].time)) / 60000
+      total += duracao
     }
   }
   return Math.round(total)
+}
+
+/* Intervalos de até 15 minutos NÃO são descontados da jornada (Súmula 437, II, do TST — o
+   intervalo nesse intervalo é apenas um battimento de passagem, não descanso efetivo). Vale pra
+   qualquer vínculo: o art. 71, §1º da CLT só exige 15 min de intervalo na faixa de 4h a 6h, e é
+   justamente esse intervalo-mínimo que não pode virar desconto de jornada — descontá-lo faria
+   quem trabalhou 5h (07:30–12:30, com 15 min de almoço) ser creditado como 4h45. Acima de 15 min
+   o desconto vale, normalmente, e continua respeitando o que foi.customizado no cadastro. */
+export const INTERVALO_NAO_DESCONTADO_MIN = 15
+
+/* O intervalo de um dia deve ser descontado da jornada? Só quando for computado dentro da jornada
+   (estagiário de 4h–6h, por definição do escritório) OU quando durar mais de 15 min. */
+function intervaloDescontaDaJornada(duracaoMinutos, contarDentroDaJornada) {
+  if (contarDentroDaJornada) return true
+  return (duracaoMinutos ?? 0) > INTERVALO_NAO_DESCONTADO_MIN
 }
 
 /* Duração do intervalo intrajornada prevista, a partir da jornada diária (art. 71
@@ -315,9 +334,12 @@ function buildDaySummaryComSchedule(dayKey, merged, employee, expectedMinutes, c
   const saidaCalc = saidaTolerada ? saidaPrevista : saidaReal
 
   // Duração do intervalo usada no cálculo: a esperada (se tolerada) ou a real batida. Pra
-  // funcionário cujo intervalo conta dentro da jornada (estagiário 5-6h), a duração do
-  // intervalo não desconta nada, então não entra na conta.
-  const duracaoUsada = incluirIntervalo ? 0 : (intervaloTolerado ? duracaoEsperada : (duracaoReal ?? 0))
+  // funcionário cujo intervalo conta dentro da jornada (estagiário 5-6h), a duração do intervalo
+  // não desconta nada, então não entra na conta. E mesmo no cálculo por horário previsto, um
+  // intervalo de até 15 min não é descontado (Súmula 437, II, do TST) — senão a faixa de 4h a 6h
+  // perderia justamente os 15 min que o art. 71, §1º da CLT só exige como pausa.
+  const duracaoConsiderada = incluirIntervalo ? 0 : (intervaloTolerado ? duracaoEsperada : (duracaoReal ?? 0))
+  const duracaoUsada = intervaloDescontaDaJornada(duracaoConsiderada, false) ? duracaoConsiderada : 0
   const minutes = Math.round((saidaCalc - entradaCalc) / 60000 - duracaoUsada)
   const balance = minutes - expectedMinutes
   return { minutes, balance, toleranciaAplicada: entradaTolerada || saidaTolerada || intervaloTolerado }
